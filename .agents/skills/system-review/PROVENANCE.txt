@@ -1,0 +1,4 @@
+source: handwritten for Pursuit AI-Native Fellowship
+pinned-commit: N/A
+installed: 2026-06-12
+license: MIT
