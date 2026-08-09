@@ -7,9 +7,10 @@ Working task list for **IRONSIGHT**. Read this at the start of a work session an
 ## Open
 
 ### Phase 0 — before the roadmap starts
-- [ ] Add `zod` and wire runtime validation into one API route as a reference implementation
-- [ ] Decide which of the ~12 types in `src/types/index.ts` become `IronsightEvent` vs. stay bespoke. `MarketData`, `StaticShip`, and the `ThreatClock` timezone table are not events — say so explicitly before Phase 1 starts, not mid-refactor
-- [ ] Pin down where `SourceAdapter` and Zod validation live: the API route handlers (server) or a client store. `draft-implementation-plan.md` §1 says "in-browser", but all fetching/parsing currently happens server-side in `src/app/api/*/route.ts`
+- [x] ~~Add `zod` and wire runtime validation into one API route as a reference implementation~~ ✅ done 2026-08-09 — `src/lib/events/{schema,sourceAdapter}.ts` + `src/lib/events/adapters/googleNewsConflict.ts`, wired into `/api/conflicts`
+- [x] ~~Pin down where `SourceAdapter` and Zod validation live: the API route handlers (server) or a client store~~ ✅ done 2026-08-09 — server-side, in the route handlers, where fetching already happens. `draft-implementation-plan.md` §1's "in-browser" language describes the product boundary (no persistent server, no DB), not literally where validation code runs
+- [ ] Decide which of the ~12 types in `src/types/index.ts` become `IronsightEvent` vs. stay bespoke. `MarketData`, `StaticShip`, and the `ThreatClock` timezone table are not events — say so explicitly before Phase 1 starts, not mid-refactor. `/api/conflicts` is the one route migrated so far, and it still returns `ConflictEvent[]` at the boundary (see below) — this question is still open for the other 13 routes
+- [ ] `/api/conflicts`'s `toConflictEvent()` mapping in `route.ts` is a deliberate, commented compatibility shim — it exists so `ConflictFeed`/`ConflictMap` don't need touching yet. Remove it once Phase 2 migrates those panels to consume `IronsightEvent` directly; until then it's a second shape for the same data and should not be copied to other routes without a reason
 
 ### Correctness
 - [ ] `src/lib/hooks.ts:30` — `useCallback` omits `data` from its deps, so the "keep previous data if the response is empty" guard closes over a stale `data`. The guard silently stops working after the first render. Lint warns about this
