@@ -1,20 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useConflict } from '@/lib/conflicts/context';
+
+// The wall clock is an external mutable source, so it's read through
+// useSyncExternalStore rather than mirrored into state via an effect.
+const subscribe = (onChange: () => void) => {
+  const id = setInterval(onChange, 1000);
+  return () => clearInterval(id);
+};
+
+// Epoch *seconds*, not a Date: getSnapshot must return a referentially stable value
+// for repeated calls within the same tick, or React re-renders forever.
+const getSnapshot = () => Math.floor(Date.now() / 1000);
+
+// null on the server and during hydration, so SSR and the first client render agree.
+const getServerSnapshot = () => null;
 
 export default function ThreatClock() {
   const { config } = useConflict();
   const TIME_ZONES = config.client.timeZones;
-  const [time, setTime] = useState<Date | null>(null);
+  const epochSeconds = useSyncExternalStore<number | null>(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot
+  );
 
-  useEffect(() => {
-    setTime(new Date());
-    const id = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  if (!time) {
+  if (epochSeconds === null) {
     return (
       <div className="flex items-center gap-4 px-4 py-1.5">
         <span className="text-[9px] text-[var(--text-secondary)]">Loading clocks...</span>
@@ -22,6 +34,7 @@ export default function ThreatClock() {
     );
   }
 
+  const time = new Date(epochSeconds * 1000);
   const utc = time.toISOString().replace('T', ' ').substring(0, 19);
 
   return (
