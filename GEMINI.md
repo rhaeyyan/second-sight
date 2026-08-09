@@ -93,3 +93,30 @@ All subagents and the orchestrator must strictly adhere to the following develop
 
 *   **Domain & Engine Logic:** Strictly adhere to SOLID principles. Rely on interfaces (e.g., `SourceAdapter`), Dependency Inversion, and the Open/Closed principle to ensure the correlation engine remains entirely decoupled from specific data sources.
 *   **React UI Layer:** Favor functional composition, custom hooks, and pure functions. Do not over-engineer the UI with strict OOP hierarchies. Simplicity and composability beat pattern purity.
+
+## Hand-Off Schemas
+
+To prevent context loss and ensure rigorous engineering, agents must use these standardized structures when passing work to each other.
+
+### [SPEC] / [SPIKE]
+Written by the orchestrator before any code is built. The subagent receives this as their absolute contract.
+```text
+- **Objective**: <what the code must achieve>
+- **Inputs/Outputs**: <types, schemas, JSON shapes>
+- **Design Pattern**: <pattern + justification, or "none — simple case">
+- **Intellectual Control**: <why this approach; why it won't break at scale>
+- **Constraints**: <performance, forbidden libraries, style>
+- **Edge Cases**: <error handling, null states>
+- **Files**: <max 5 files this task may touch>
+- **Tipping Point**: <threshold where this must be refactored/decomposed>
+```
+
+### [COMPLETION-REPORT]
+Written by the executing subagent when the task is finished.
+```text
+- **Files changed**: <list>
+- **Spec items satisfied**: <checklist against the SPEC>
+- **Complexity Justification**: <defend every line added against bloat>
+- **Known gaps**: <or "none">
+- **Tipping Point Progress**: <how close to the defined Tipping Point>
+```
