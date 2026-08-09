@@ -1,6 +1,6 @@
 ---
 name: system-review
-description: Run weekly read-only audits of skills, MCP servers, hooks, agents, and Sprint Ledger. Produces prioritized [SYSTEM-REVIEW-REPORT] for human approval.
+description: On-demand read-only audit of skills, MCP servers, hooks, and agents. Produces a prioritized [SYSTEM-REVIEW-REPORT] for human approval. Run when the tooling feels off, not on a schedule.
 user-invocable: true
 allowed-tools: "Read Bash Glob Grep"
 ---
@@ -11,36 +11,36 @@ Run a structured audit of the engineering system and produce a [SYSTEM-REVIEW-RE
 
 ## When to Run
 
-At the end of every fellowship week, or any time the system feels off.
+On demand — when the tooling is getting in the way, when skills contradict each other, or
+after a batch of config changes. This is a solo repo; a standing weekly audit costs more
+than it finds. Do not run it on a schedule.
 
 ## Step 1 — Gather System State
 
 Read all of the following before forming any opinion:
 
-```bash
-# Recent work
-cat SESSION_STATE.md
+Read all of the following before forming any opinion. Several of these paths are optional —
+skip any that don't exist rather than treating absence as a finding.
 
-# Current rules and stack defaults
+```bash
+# Project rules — CLAUDE.md is the single source of truth. GEMINI.md is a pointer to it;
+# if GEMINI.md has regrown its own content, that duplication IS a finding.
 cat CLAUDE.md GEMINI.md
 
+# Roadmap and open work
+cat draft-implementation-plan.md TODO.md
+
 # Installed skills
-ls skills/
+ls .agents/skills/ .claude/skills/
 
-# Configured MCP servers (static config + live connectivity/auth status per server)
-cat .mcp.json
-cat .gemini/settings.json
-claude mcp list
+# Configured MCP servers, hooks, agents (all optional — none may exist)
+cat .mcp.json 2>/dev/null
+cat .claude/settings.json .claude/settings.local.json 2>/dev/null
+ls .claude/hooks/ .claude/agents/ 2>/dev/null
 
-# Active hooks (all of them — not just two)
-cat .claude/hooks/*.sh
-
-# Agent roster: full content, not just names — needed to compare against
-# GEMINI.md's inline define_subagent blocks (Cross-Tool Parity, below)
-cat .claude/agents/*.md
-
-# Mechanical config-parity check (skill-copy file lists, MCP server names)
-./.claude/hooks/check-config-parity.sh
+# The gate itself: does it still pass, and does it still enforce what CLAUDE.md claims?
+cat package.json eslint.config.mjs
+npm run check
 
 # Recent git activity (last 2 weeks)
 git log --oneline --since="2 weeks ago"
