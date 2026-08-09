@@ -120,3 +120,21 @@ Written by the executing subagent when the task is finished.
 - **Known gaps**: <or "none">
 - **Tipping Point Progress**: <how close to the defined Tipping Point>
 ```
+
+## Stack Best Practices
+
+To maintain code quality in this specific Next.js + TypeScript environment, all agents must adhere to the following:
+
+1. **Code Style & Linting:**
+    *   **Strict TypeScript:** No `any` types. Ensure `strict: true` is respected.
+    *   **Tailwind Sorting:** Rely on `prettier-plugin-tailwindcss` conventions; keep utility classes organized.
+2. **Documentation (JSDoc):**
+    *   Write explicit JSDoc (`/** ... */`) comments for all core domain logic (e.g., `SourceAdapter`, `IronsightEvent`, Incident Clustering). Simple React UI components do not require block comments.
+3. **Testing Framework:**
+    *   Use **Vitest** for all domain logic testing.
+    *   Use **React Testing Library** alongside Vitest for any UI behavioral testing.
+4. **Security (Zero-Trust OSINT):**
+    *   Treat all incoming data (Telegram, RSS, external APIs) as hostile.
+    *   You **MUST** use an HTML sanitizer (e.g., `DOMPurify`) before rendering any external text/HTML to prevent XSS.
+5. **Git Protocol:**
+    *   Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`) for all commits to maintain a readable project history.
