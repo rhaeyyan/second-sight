@@ -34,6 +34,18 @@ Explicitly deferred (not attempted this phase):
 - [ ] `AlertsPanel.tsx`'s local `AlertData` interface discards `threatOriginal`/`locationsOriginal` even though `/api/alerts` already returns them (`AlertEvent` has had this data since Phase 0) — found while designing Phase 2's original-language handling, unrelated panel, not fixed here
 - [ ] `/api/feed` re-fetches the same upstream feeds `/api/conflicts` and `/api/news` already poll independently for their own panels — no shared cache between routes. Mitigated only by a conservative default poll interval (120s); revisit with shared server-side caching if this ever causes real rate-limiting
 
+### Phase 3 — Correlation Engine
+✅ done 2026-08-09. Exit criteria from `draft-implementation-plan.md`: rules covered by unit tests validating true positives, near misses, and stale/out-of-window events (all three rules); 100% of generated findings expose `evidenceEventIds`/`limitations` — enforced structurally via `AnalysisFindingSchema`'s non-empty-array constraints, not just convention, and checked directly against every rule's actual output in tests.
+
+New: `src/lib/analysis/` — `incident.ts` (`clusterEvents`, non-destructive union-find grouping by theater + time window + title similarity), `finding.ts` (`AnalysisFindingSchema`), `rules/{corroboration,sensorNarrativeCorrelation,escalationPattern}.ts` (the three conservative rules), `engine.ts` (`runCorrelationEngine` + `pruneExpiredFindings`). NASA FIRMS's standalone adapter (left unwired from `/api/fires` in Phase 1) gets its intended purpose here — the sensor-narrative rule is the first thing to actually consume its `location`/`occurredAt` fields.
+
+**Engine only — no UI wiring this phase**, a deliberate scope decision (the plan's Phase 3 checklist is exactly clustering + rules + evidence-exposure, with exit criteria entirely about unit tests).
+
+Explicitly deferred (not attempted this phase):
+- [ ] No UI surface for findings anywhere (`/feed` or elsewhere) — real, separate design work: where do findings show, how do they relate to the raw event list already there, does pausing the feed also freeze findings
+- [ ] `runCorrelationEngine` re-clusters and re-runs all rules from scratch on every call — fine for the batch sizes tested, but if it's ever run repeatedly against a large accumulated `EventStore` (thousands of events), the O(n²) clustering pairwise comparison is worth revisiting before wiring into anything that calls it on a poll interval
+- [ ] No caching/memoization of clustering results across calls — each `runCorrelationEngine` call reclusters from zero
+
 ### Correctness
 - [x] ~~`src/lib/hooks.ts:30` — `useCallback` omits `data` from its deps, so the "keep previous data if the response is empty" guard closes over a stale `data`~~ ✅ done 2026-08-09 — switched to the `setData(prev => ...)` functional form so the guard reads live state instead of the closure; regression test in `src/lib/hooks.test.ts`
 - [x] ~~Replace bare `catch { return [] }` in the API routes (e.g. `src/app/api/news/route.ts:68`) with explicit `SourceHealthStatus`~~ ✅ done 2026-08-09 — every route now reports `SourceHealth` via the `X-Source-Health` header (single value for single-source routes, an array for aggregators — one entry per feed/query/symbol/channel). Not consumed by the UI yet (Phase 2); inspectable via devtools in the meantime. `ships/route.ts` reports a nominal always-healthy status since it has no real external fetch to fail. Fixture-tested throughout except `ships`, which is Config-tier (static registry, typecheck only)
