@@ -1,134 +1,105 @@
-import { describe, it, expect, vi } from 'vitest';
-import { fetchRSS } from './route';
-import type { fetchWithTimeout } from '@/lib/fetcher';
+import { describe, it, expect } from 'vitest';
+import { isNewsRelevant, dedupeByTitle, toNewsItem } from './route';
+import type { IronsightEvent } from '@/lib/events/schema';
 
 const MOCK_NOW = 1_760_000_000_000;
 
-function rssFeed(items: string[]): string {
-  return `<?xml version="1.0"?>
-<rss version="2.0"><channel>
-${items.join('\n')}
-</channel></rss>`;
+// Minimal, schema-valid IronsightEvent, with per-test overrides for the fields under
+// test — avoids re-deriving every required field in each test case.
+function newsEvent(overrides: Partial<IronsightEvent> = {}): IronsightEvent {
+  return {
+    id: 'news-iran-israel-test',
+    source: { id: 'news-rss-iran-israel', name: 'Example Wire', sourceType: 'media' },
+    type: 'REPORT',
+    theater: 'iran-israel',
+    reportedAt: MOCK_NOW,
+    ingestedAt: MOCK_NOW,
+    severity: 'info',
+    confidence: 'low',
+    verificationStatus: 'single-source',
+    title: 'Missile strike hits border town',
+    tags: [],
+    url: 'https://news.example.com/a',
+    ...overrides,
+  };
 }
 
-function rssItem(title: string, link: string, pubDate: string): string {
-  return `<item><title>${title}</title><link>${link}</link><pubDate>${pubDate}</pubDate></item>`;
-}
+describe('isNewsRelevant', () => {
+  const relevanceKeywords = /missile|strike|iran|israel/i;
+  const unfilteredSources = new Set(['Times of Israel']);
 
-function atomFeed(entries: string[]): string {
-  return `<?xml version="1.0"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-${entries.join('\n')}
-</feed>`;
-}
+  it('hard-excludes sports/entertainment noise even if it matches relevance keywords', () => {
+    const event = newsEvent({ title: 'Iran wins world cup qualifier in dramatic strike of the ball' });
+    expect(isNewsRelevant(event, relevanceKeywords, unfilteredSources)).toBe(false);
+  });
 
-function atomEntry(title: string, href: string, updated: string): string {
-  return `<entry><title>${title}</title><link href="${href}"/><updated>${updated}</updated></entry>`;
-}
+  it('passes an item from an unfiltered source regardless of keyword match', () => {
+    const event = newsEvent({ title: 'Local bakery wins award', source: { id: 'x', name: 'Times of Israel', sourceType: 'media' } });
+    expect(isNewsRelevant(event, relevanceKeywords, unfilteredSources)).toBe(true);
+  });
 
-function fakeResponse(status: number, body: string): Response {
-  return { ok: status >= 200 && status < 300, status, text: async () => body } as Response;
-}
+  it('passes an item whose title matches the relevance keywords', () => {
+    const event = newsEvent({ title: 'Missile strike reported near border' });
+    expect(isNewsRelevant(event, relevanceKeywords, unfilteredSources)).toBe(true);
+  });
 
-describe('fetchRSS', () => {
-  it('parses RSS items and reports healthy', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
-      fakeResponse(200, rssFeed([rssItem('Strike hits border town', 'https://example.com/a', 'Mon, 01 Jan 2024 00:00:00 GMT')]))
-    );
+  it('checks the relevance keywords against the tag when the title does not match', () => {
+    const event = newsEvent({ title: 'Officials issue statement', tags: ['israel'] });
+    expect(isNewsRelevant(event, relevanceKeywords, unfilteredSources)).toBe(true);
+  });
 
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
+  it('rejects an item that matches neither noise nor relevance keywords', () => {
+    const event = newsEvent({ title: 'Local weather forecast for the weekend' });
+    expect(isNewsRelevant(event, relevanceKeywords, unfilteredSources)).toBe(false);
+  });
+});
 
-    expect(result.items).toEqual([{
-      title: 'Strike hits border town',
-      link: 'https://example.com/a',
+describe('dedupeByTitle', () => {
+  it('drops a later event whose title matches an earlier one after lowercasing', () => {
+    const events = [
+      newsEvent({ id: 'a', title: 'Missile Strike Hits Border Town' }),
+      newsEvent({ id: 'b', title: 'missile strike hits border town' }),
+    ];
+    const result = dedupeByTitle(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('a');
+  });
+
+  it('keeps events with distinct titles', () => {
+    const events = [
+      newsEvent({ id: 'a', title: 'Missile strike hits border town' }),
+      newsEvent({ id: 'b', title: 'Ceasefire talks resume in Cairo' }),
+    ];
+    expect(dedupeByTitle(events)).toHaveLength(2);
+  });
+});
+
+describe('toNewsItem', () => {
+  it('maps an IronsightEvent to the legacy NewsItem shape, including the link from url', () => {
+    const event = newsEvent({
+      title: 'Missile strike hits border town',
+      source: { id: 'x', name: 'Example Wire', sourceType: 'media' },
+      reportedAt: MOCK_NOW,
+      tags: ['diplomacy'],
+      url: 'https://news.example.com/strike-report',
+    });
+
+    expect(toNewsItem(event)).toEqual({
+      title: 'Missile strike hits border town',
+      link: 'https://news.example.com/strike-report',
       source: 'Example Wire',
-      pubDate: 'Mon, 01 Jan 2024 00:00:00 GMT',
-      category: undefined,
-    }]);
-    expect(result.health).toEqual({
-      sourceId: 'Example Wire',
-      status: 'healthy',
-      lastAttemptAt: MOCK_NOW,
-      lastSuccessAt: MOCK_NOW,
+      pubDate: new Date(MOCK_NOW).toISOString(),
+      category: 'diplomacy',
     });
   });
 
-  it('parses Atom entries, reading the link from the href attribute', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
-      fakeResponse(200, atomFeed([atomEntry('Ceasefire talks resume', 'https://example.com/b', '2024-01-01T00:00:00Z')]))
-    );
-
-    const result = await fetchRSS('https://feed.example.com/atom', 'Example Atom', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items).toEqual([{
-      title: 'Ceasefire talks resume',
-      link: 'https://example.com/b',
-      source: 'Example Atom',
-      pubDate: '2024-01-01T00:00:00Z',
-      category: undefined,
-    }]);
-    expect(result.health.status).toBe('healthy');
+  it('falls back to an empty string link when the event has no url', () => {
+    const event = newsEvent({ url: undefined });
+    expect(toNewsItem(event).link).toBe('');
   });
 
-  it('strips the " - Source" suffix only for Google News', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
-      fakeResponse(200, rssFeed([rssItem('Missile strike hits Tehran - Reuters', 'https://example.com/c', 'Mon, 01 Jan 2024 00:00:00 GMT')]))
-    );
-
-    const result = await fetchRSS('https://news.google.com/rss', 'Google News', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items[0].title).toBe('Missile strike hits Tehran');
-  });
-
-  it('reports rate-limited on a 429 without throwing', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(fakeResponse(429, ''));
-
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items).toEqual([]);
-    expect(result.health.status).toBe('rate-limited');
-  });
-
-  it('reports unavailable on other non-ok statuses', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(fakeResponse(503, ''));
-
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.health.status).toBe('unavailable');
-  });
-
-  it('reports unavailable when the fetch throws (timeout/network)', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockRejectedValue(new Error('network unreachable'));
-
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items).toEqual([]);
-    expect(result.health.status).toBe('unavailable');
-  });
-
-  it('reports invalid-response when the feed serves an HTML page instead of XML', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
-      fakeResponse(200, '<!DOCTYPE html><html><body>Service unavailable</body></html>')
-    );
-
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items).toEqual([]);
-    expect(result.health.status).toBe('invalid-response');
-  });
-
-  it('drops items with no title but keeps parsing the rest', async () => {
-    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
-      fakeResponse(200, rssFeed([
-        '<item><link>https://example.com/notitle</link><pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate></item>',
-        rssItem('Valid item', 'https://example.com/d', 'Mon, 01 Jan 2024 00:00:00 GMT'),
-      ]))
-    );
-
-    const result = await fetchRSS('https://feed.example.com/rss', 'Example Wire', { fetchImpl, now: () => MOCK_NOW });
-
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].title).toBe('Valid item');
-    expect(result.health.status).toBe('healthy');
+  it('leaves category undefined when the event has no tags', () => {
+    const event = newsEvent({ tags: [] });
+    expect(toNewsItem(event).category).toBeUndefined();
   });
 });
