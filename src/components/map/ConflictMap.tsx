@@ -317,6 +317,15 @@ export default function ConflictMap({ className }: MapProps) {
 
     mapRef.current = map;
 
+    // Captured here rather than read as ref.current inside the cleanup closure below —
+    // these Map instances are never reassigned (only mutated via .set/.clear elsewhere),
+    // so this is identical in behavior, but satisfies exhaustive-deps' staleness check.
+    const airMarkers = airMarkersRef.current;
+    const navalMarkers = navalMarkersRef.current;
+    const droneMarkers = droneMarkersRef.current;
+    const droneTrails = droneTrailsRef.current;
+    const flightTrails = flightTrailsRef.current;
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -329,13 +338,18 @@ export default function ConflictMap({ className }: MapProps) {
       toolLayerRef.current = null;
       droneLayerRef.current = null;
       measureLayerRef.current = null;
-      airMarkersRef.current.clear();
-      navalMarkersRef.current.clear();
-      droneMarkersRef.current.clear();
-      droneTrailsRef.current.clear();
+      airMarkers.clear();
+      navalMarkers.clear();
+      droneMarkers.clear();
+      droneTrails.clear();
       citiesDrawnRef.current = false;
-      flightTrailsRef.current.clear();
+      flightTrails.clear();
     };
+    // cfg.mapCenter/cfg.mapZoom seed the initial view only; this effect is guarded to run
+    // once per mount (bails if mapRef.current is already set), and cfg itself is stable
+    // for the component's lifetime — page.tsx remounts ConflictMap via key={conflictKey}
+    // on every theater switch, so cfg never actually changes mid-mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
   // === COUNTRY BORDERS OVERLAY ===
@@ -467,6 +481,10 @@ export default function ConflictMap({ className }: MapProps) {
       cityMarkersRef.current.set(city.name, marker);
     });
     citiesDrawnRef.current = true;
+    // cfg.cities/cfg.cityColors are read once — this effect is guarded to draw cities
+    // only on first mount (citiesDrawnRef), and cfg is stable for the component's
+    // lifetime (see the map-init effect above for why).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
   // Update city popups when conflict/alert data changes
@@ -532,6 +550,8 @@ export default function ConflictMap({ className }: MapProps) {
       html += `</div>`;
       marker.setPopupContent(html);
     });
+    // cfg.cities is stable for the component's lifetime (see the map-init effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflicts, alerts]);
 
   // City/air/naval visibility toggles
@@ -834,6 +854,9 @@ export default function ConflictMap({ className }: MapProps) {
       }
     }
     prevAlertStatusRef.current = alerts?.status || 'CLEAR';
+    // cfg.alertCities/alertFallbackCenter/defaultMissileOrigin/missileOrigins are stable
+    // for the component's lifetime (see the map-init effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alerts]);
 
   // === STRIKE MARKERS from conflict feed, strikes API, AND Telegram ===
@@ -940,6 +963,9 @@ export default function ConflictMap({ className }: MapProps) {
     });
 
     console.log(`[MAP] Plotted ${plotted.size} strike markers`);
+    // cfg.strikeLocations/strikeTargets are stable for the component's lifetime (see the
+    // map-init effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflicts, strikes, telegram]);
 
   // === MISSILE RANGE RINGS ===
@@ -969,6 +995,8 @@ export default function ConflictMap({ className }: MapProps) {
       marker.bindTooltip(site.name, { className: 'city-label', direction: 'right', offset: [6, 0] });
       rangeLayerRef.current!.addLayer(marker);
     });
+    // cfg.launchSites is stable for the component's lifetime (see the map-init effect above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRangeRings]);
 
   return (

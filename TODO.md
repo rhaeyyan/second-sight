@@ -19,6 +19,6 @@ Working task list for **IRONSIGHT**. Read this at the start of a work session an
 ### Tooling
 - [ ] Axe assertions are wired up (`vitest-axe`) but unused — add them with the Phase 2 feed work
 - [ ] `vitest-axe` is on 0.1.0 and unmaintained; if it breaks against a future Vitest major, switch to `axe-core` directly
-- [ ] 14 pre-existing lint warnings, mostly `react-hooks/exhaustive-deps` in `ConflictMap.tsx`. Not blocking the gate. Worth a pass when that file is next touched
+- [x] ~~14 pre-existing lint warnings, mostly `react-hooks/exhaustive-deps` in `ConflictMap.tsx`~~ ✅ done 2026-08-09 — two root causes: (1) 5 warnings about reading `ref.current` inside a cleanup closure, fixed by capturing the ref values in local consts before the closure (the underlying `Map`s are never reassigned, so behavior is unchanged); (2) 6 warnings about effects missing `cfg.*` deps, resolved with justified `eslint-disable` rather than adding them — `page.tsx` remounts `ConflictMap` via `key={conflictKey}` on every theater switch, so `cfg` is stable for a given instance's whole lifetime and adding it to deps arrays would misleadingly imply the effects react to `cfg` changes they structurally can't observe
 
 _Mark done inline: `- [x] ~~task~~ ✅ done YYYY-MM-DD`._
