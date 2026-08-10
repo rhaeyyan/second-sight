@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { fetchWithTimeout } from '@/lib/fetcher';
 import { getConflictFromRequest } from '@/lib/conflicts';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,24 +10,51 @@ export const dynamic = 'force-dynamic';
 // Has a military database (dbFlags bit 1) that properly identifies military aircraft
 // Much better than OpenSky for mil tracking
 
+interface AdsbFeedResult {
+  ac: AircraftState[];
+  health: SourceHealth;
+}
+
+/** Fetches one adsb.lol feed. GET queries two (global mil + regional), each with its own health. */
+export async function fetchAdsbFeed(
+  sourceId: string,
+  url: string,
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<AdsbFeedResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+
+  try {
+    const res = await fetchImpl(url, { timeout: 8000, headers: { 'Accept': 'application/json' } });
+    if (!res.ok) {
+      return {
+        ac: [],
+        health: { sourceId, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
+    const json = await res.json();
+    return {
+      ac: Array.isArray(json?.ac) ? json.ac : [],
+      health: { sourceId, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt },
+    };
+  } catch {
+    return { ac: [], health: { sourceId, status: 'unavailable', lastAttemptAt } };
+  }
+}
+
 export async function GET(req: Request) {
   const { server } = getConflictFromRequest(req);
   const { flightsCenter: center, flightsBBox: bbox } = server;
   try {
-    // Fetch all sources in parallel with short timeouts
-    const [milResult, regionResult] = await Promise.allSettled([
-      fetchWithTimeout('https://api.adsb.lol/v2/mil', {
-        timeout: 8000,
-        headers: { 'Accept': 'application/json' },
-      }).then(r => r.ok ? r.json() : { ac: [] }),
-      fetchWithTimeout(`https://api.adsb.lol/v2/lat/${center.lat}/lon/${center.lon}/dist/${center.dist}`, {
-        timeout: 8000,
-        headers: { 'Accept': 'application/json' },
-      }).then(r => r.ok ? r.json() : { ac: [] }),
+    // Fetch both feeds in parallel with short timeouts
+    const [milFeed, regionFeed] = await Promise.all([
+      fetchAdsbFeed('adsb-mil', 'https://api.adsb.lol/v2/mil'),
+      fetchAdsbFeed('adsb-region', `https://api.adsb.lol/v2/lat/${center.lat}/lon/${center.lon}/dist/${center.dist}`),
     ]);
-
-    const milData = milResult.status === 'fulfilled' ? milResult.value : { ac: [] };
-    const regionData = regionResult.status === 'fulfilled' ? regionResult.value : { ac: [] };
+    const health = [milFeed.health, regionFeed.health];
+    const milData = { ac: milFeed.ac };
+    const regionData = { ac: regionFeed.ac };
 
     // Filter mil feed to the active conflict's region
     const milAircraft = (milData.ac || []).filter((a: AircraftState) =>
@@ -111,7 +139,10 @@ export async function GET(req: Request) {
       source: 'adsb.lol',
       updated: new Date().toISOString(),
     }, {
-      headers: { 'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=10' },
+      headers: {
+        'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=10',
+        'X-Source-Health': JSON.stringify(health),
+      },
     });
   } catch (err) {
     console.error('Flights fetch error:', err);
