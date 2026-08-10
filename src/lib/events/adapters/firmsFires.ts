@@ -9,6 +9,9 @@ import type {
 
 const FIRMS_URL = 'https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Global_24h.csv';
 
+// Matches the cap already in src/app/api/fires/route.ts's fetchFiresData.
+const MAX_EVENTS = 100;
+
 export type FireIntensity = 'low' | 'medium' | 'high' | 'extreme';
 
 /**
@@ -120,7 +123,15 @@ export function createFirmsFiresAdapter(
           };
         }
 
-        const events: IronsightEvent[] = [];
+        // FIRMS' global 24h feed routinely yields thousands of in-bbox detections (most
+        // low-signal — agricultural burning, flares) once filtered to even a large
+        // theater bbox. src/app/api/fires/route.ts already caps at the top 100 by FRP
+        // for exactly this reason; this adapter didn't replicate that cap and would
+        // otherwise flood a consumer (e.g. the unified feed's bounded EventStore) with
+        // thousands of thermal detections in a single poll, potentially evicting
+        // higher-priority conflict/news events. Tracked as { event, frp } pairs so the
+        // cap can rank by FRP without reaching back into rawPayload after the fact.
+        const candidates: { event: IronsightEvent; frp: number }[] = [];
         const rejected: RejectedPayload[] = [];
 
         for (const line of lines.slice(1)) {
@@ -184,8 +195,13 @@ export function createFirmsFiresAdapter(
             continue;
           }
 
-          events.push(parsed.data);
+          candidates.push({ event: parsed.data, frp });
         }
+
+        const events = candidates
+          .sort((a, b) => b.frp - a.frp)
+          .slice(0, MAX_EVENTS)
+          .map((c) => c.event);
 
         return {
           events,

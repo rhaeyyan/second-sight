@@ -169,6 +169,25 @@ describe('createFirmsFiresAdapter', () => {
     expect(result.health.status).toBe('unavailable');
   });
 
+  it('caps events at the top 100 by FRP when a bbox has more detections than that', async () => {
+    // FIRMS' global feed routinely yields thousands of in-bbox rows once filtered even
+    // to a large theater bbox — most low-signal. 150 rows, FRP 1..150, only the highest
+    // 100 (51..150) should survive.
+    const rows = Array.from({ length: 150 }, (_, i) =>
+      csvRow({ latitude: '32.5', longitude: '35.1', frp: String(i + 1), bright_ti4: '300' })
+    );
+    const csv = [CSV_HEADER, ...rows].join('\n');
+    const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(fakeResponse(200, csv));
+
+    const adapter = createFirmsFiresAdapter('iran-israel', bbox, { now: () => MOCK_NOW, fetchImpl });
+    const result = await adapter.fetch();
+
+    expect(result.events).toHaveLength(100);
+    const frps = result.events.map((e) => (e.rawPayload as { frp: number }).frp);
+    expect(Math.min(...frps)).toBe(51);
+    expect(Math.max(...frps)).toBe(150);
+  });
+
   it('reports invalid-response when FIRMS serves a page missing the expected columns', async () => {
     const fetchImpl = vi.fn<typeof fetchWithTimeout>().mockResolvedValueOnce(
       fakeResponse(200, '<html><body>Service temporarily unavailable</body></html>')
