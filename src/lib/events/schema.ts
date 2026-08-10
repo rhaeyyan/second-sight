@@ -70,7 +70,14 @@ export const IronsightEventSchema = z.object({
 
   title: z.string().min(1),
   summary: z.string().optional(),
+  // `title` is always the display text (translated to English when the source wasn't).
+  // originalTitle preserves the untranslated source text when translation happened —
+  // captured before title is overwritten, same pattern as AlertEvent's threat/
+  // threatOriginal in src/app/api/alerts/route.ts. Paired with originalLanguage so a
+  // consumer can render both with correct lang/dir attributes (draft-implementation-
+  // plan.md §5's "Original Language Preservation" guardrail).
   originalLanguage: z.string().optional(),
+  originalTitle: z.string().optional(),
   // Permalink to this specific report — distinct from source.url, which identifies the
   // feed/outlet itself. Optional because not every adapter's source has per-item links
   // (e.g. a sensor feed like NASA FIRMS has nothing here to link to).

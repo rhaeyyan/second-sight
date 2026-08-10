@@ -44,6 +44,7 @@ describe('IronsightEventSchema — valid payloads', () => {
       location: { latitude: 35.6892, longitude: 51.389, precision: 'regional' },
       summary: 'Multiple outlets reporting an explosion.',
       originalLanguage: 'fa',
+      originalTitle: 'حمله موشکی نزدیک تهران گزارش شد',
       url: 'https://reuters.com/world/middle-east/some-article',
       relatedEventIds: ['gn-1-1760000000000'],
       rawPayload: { raw: 'unmodified feed item' },
@@ -55,6 +56,12 @@ describe('IronsightEventSchema — valid payloads', () => {
     const result = IronsightEventSchema.safeParse(validEvent);
     expect(result.success).toBe(true);
     expect(result.data?.url).toBeUndefined();
+  });
+
+  it('accepts an event with no originalTitle — most events are never translated', () => {
+    const result = IronsightEventSchema.safeParse(validEvent);
+    expect(result.success).toBe(true);
+    expect(result.data?.originalTitle).toBeUndefined();
   });
 });
 
