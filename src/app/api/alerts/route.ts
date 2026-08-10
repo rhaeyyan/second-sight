@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetcher';
 import { translateHebrew, translateCities, isHebrew, translateFreeText, CITY_TRANSLATIONS } from '@/lib/hebrew';
 import { getConflictFromRequest } from '@/lib/conflicts';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,11 @@ export const dynamic = 'force-dynamic';
 // Cached per conflict so switching theaters doesn't leak stale alerts.
 const STICKY_DURATION = 90_000; // 90 seconds
 const stickyByConflict: Record<string, (AlertEvent & { firstSeen: number })[]> = {};
+
+interface AlertsFetchResult {
+  alerts: AlertEvent[];
+  health: SourceHealth;
+}
 
 // Air-raid alerts. Provider depends on the active conflict:
 //  - tzevaadom: Israeli Home Front Command (Pikud HaOref) real-time alerts
@@ -20,7 +26,7 @@ export async function GET(req: Request) {
   const sourceLabel = client.alertSystemName;
   let stickyAlerts = stickyByConflict[key] || [];
 
-  const alerts: AlertEvent[] =
+  const { alerts, health } =
     server.alertProvider === 'alertsua'
       ? await fetchUkraineAlerts(sourceLabel)
       : await fetchTzevaAdomAlerts(sourceLabel);
@@ -53,101 +59,134 @@ export async function GET(req: Request) {
     lastChecked: new Date().toISOString(),
     source: sourceLabel,
   }, {
-    headers: { 'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=3' }, // Check every 5 seconds
+    headers: {
+      'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=3', // Check every 5 seconds
+      'X-Source-Health': JSON.stringify(health),
+    },
   });
 }
 
 // --- Provider: Israeli Home Front Command via Tzeva Adom (Hebrew) ---
-async function fetchTzevaAdomAlerts(sourceLabel: string): Promise<AlertEvent[]> {
+export async function fetchTzevaAdomAlerts(
+  sourceLabel: string,
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<AlertsFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+  const sourceId = 'tzevaadom';
   const alerts: AlertEvent[] = [];
+
   try {
-    const res = await fetchWithTimeout('https://api.tzevaadom.co.il/notifications', {
+    const res = await fetchImpl('https://api.tzevaadom.co.il/notifications', {
       timeout: 12000,
       headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/json' },
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        data.forEach((alert: TzevaAdomAlert, i: number) => {
-          const rawThreat = alert.threat || alert.title || 'Alert';
-          const rawCities = Array.isArray(alert.cities) ? alert.cities : [alert.data || 'Unknown'];
+    if (!res.ok) {
+      return {
+        alerts: [],
+        health: { sourceId, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
 
-          let translatedThreat = translateHebrew(rawThreat);
-          const translatedLocations = translateCities(rawCities);
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      data.forEach((alert: TzevaAdomAlert, i: number) => {
+        const rawThreat = alert.threat || alert.title || 'Alert';
+        const rawCities = Array.isArray(alert.cities) ? alert.cities : [alert.data || 'Unknown'];
 
-          // If the "threat" field is actually a city name (API sometimes puts city in wrong field),
-          // move it to locations and use a generic threat label
-          if (CITY_TRANSLATIONS[rawThreat]) {
-            if (!rawCities.includes(rawThreat)) {
-              translatedLocations.push(CITY_TRANSLATIONS[rawThreat]);
-            }
-            translatedThreat = 'Rocket/Missile Alert';
+        let translatedThreat = translateHebrew(rawThreat);
+        const translatedLocations = translateCities(rawCities);
+
+        // If the "threat" field is actually a city name (API sometimes puts city in wrong field),
+        // move it to locations and use a generic threat label
+        if (CITY_TRANSLATIONS[rawThreat]) {
+          if (!rawCities.includes(rawThreat)) {
+            translatedLocations.push(CITY_TRANSLATIONS[rawThreat]);
           }
+          translatedThreat = 'Rocket/Missile Alert';
+        }
 
-          alerts.push({
-            id: `tzeva-${i}-${Date.now()}`,
-            time: alert.date || new Date().toISOString(),
-            type: categorizeAlert(rawThreat),
-            threat: translatedThreat,
-            threatOriginal: rawThreat,
-            locations: translatedLocations,
-            locationsOriginal: rawCities,
-            source: sourceLabel,
-            active: true,
-          });
-        });
-      }
-    }
-  } catch (err) {
-    const isTimeout = err instanceof Error && (err.message.includes('Timeout') || (err as NodeJS.ErrnoException).code === 'UND_ERR_CONNECT_TIMEOUT');
-    if (!isTimeout) console.error('Tzeva Adom fetch error:', err);
-  }
-
-  // Fallback: use Google Translate for any remaining Hebrew text the dictionary missed
-  await Promise.all(alerts.map(async (alert) => {
-    if (isHebrew(alert.threat)) {
-      alert.threat = await translateFreeText(alert.threat);
-    }
-    alert.locations = await Promise.all(
-      alert.locations.map(loc => isHebrew(loc) ? translateFreeText(loc) : Promise.resolve(loc))
-    );
-  }));
-
-  return alerts;
-}
-
-// --- Provider: Ukrainian oblast air-raid alerts via alerts.com.ua (free, English names) ---
-async function fetchUkraineAlerts(sourceLabel: string): Promise<AlertEvent[]> {
-  const alerts: AlertEvent[] = [];
-  try {
-    const res = await fetchWithTimeout('https://alerts.com.ua/api/states', {
-      timeout: 12000,
-      headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/json' },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const states: AlertsUaState[] = Array.isArray(data?.states) ? data.states : [];
-      states.filter(s => s.alert).forEach((s, i) => {
-        const name = s.name_en || s.name || 'Unknown';
         alerts.push({
-          id: `ua-${s.id ?? i}-${Date.now()}`,
-          time: s.changed || new Date().toISOString(),
-          type: 'ALERT',
-          threat: 'Air Raid Alert',
-          threatOriginal: `ua-${s.id ?? name}`,
-          locations: [name],
-          locationsOriginal: [name],
+          id: `tzeva-${i}-${lastAttemptAt}`,
+          time: alert.date || new Date(lastAttemptAt).toISOString(),
+          type: categorizeAlert(rawThreat),
+          threat: translatedThreat,
+          threatOriginal: rawThreat,
+          locations: translatedLocations,
+          locationsOriginal: rawCities,
           source: sourceLabel,
           active: true,
         });
       });
     }
+
+    // Fallback: use Google Translate for any remaining Hebrew text the dictionary missed
+    await Promise.all(alerts.map(async (alert) => {
+      if (isHebrew(alert.threat)) {
+        alert.threat = await translateFreeText(alert.threat);
+      }
+      alert.locations = await Promise.all(
+        alert.locations.map(loc => isHebrew(loc) ? translateFreeText(loc) : Promise.resolve(loc))
+      );
+    }));
+
+    return { alerts, health: { sourceId, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt } };
+  } catch (err) {
+    const isTimeout = err instanceof Error && (err.message.includes('Timeout') || (err as NodeJS.ErrnoException).code === 'UND_ERR_CONNECT_TIMEOUT');
+    if (!isTimeout) console.error('Tzeva Adom fetch error:', err);
+    return { alerts: [], health: { sourceId, status: 'unavailable', lastAttemptAt } };
+  }
+}
+
+// --- Provider: Ukrainian oblast air-raid alerts via alerts.com.ua (free, English names) ---
+export async function fetchUkraineAlerts(
+  sourceLabel: string,
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<AlertsFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+  const sourceId = 'alertsua';
+  const alerts: AlertEvent[] = [];
+
+  try {
+    const res = await fetchImpl('https://alerts.com.ua/api/states', {
+      timeout: 12000,
+      headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/json' },
+    });
+
+    if (!res.ok) {
+      return {
+        alerts: [],
+        health: { sourceId, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
+
+    const data = await res.json();
+    const states: AlertsUaState[] = Array.isArray(data?.states) ? data.states : [];
+    states.filter(s => s.alert).forEach((s, i) => {
+      const name = s.name_en || s.name || 'Unknown';
+      alerts.push({
+        id: `ua-${s.id ?? i}-${lastAttemptAt}`,
+        time: s.changed || new Date(lastAttemptAt).toISOString(),
+        type: 'ALERT',
+        threat: 'Air Raid Alert',
+        threatOriginal: `ua-${s.id ?? name}`,
+        locations: [name],
+        locationsOriginal: [name],
+        source: sourceLabel,
+        active: true,
+      });
+    });
+
+    return { alerts, health: { sourceId, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt } };
   } catch (err) {
     const isTimeout = err instanceof Error && (err.message.includes('Timeout') || (err as NodeJS.ErrnoException).code === 'UND_ERR_CONNECT_TIMEOUT');
     if (!isTimeout) console.error('alerts.com.ua fetch error:', err);
+    return { alerts: [], health: { sourceId, status: 'unavailable', lastAttemptAt } };
   }
-  return alerts;
 }
 
 interface AlertsUaState {
