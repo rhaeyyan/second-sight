@@ -71,6 +71,10 @@ export const IronsightEventSchema = z.object({
   title: z.string().min(1),
   summary: z.string().optional(),
   originalLanguage: z.string().optional(),
+  // Permalink to this specific report — distinct from source.url, which identifies the
+  // feed/outlet itself. Optional because not every adapter's source has per-item links
+  // (e.g. a sensor feed like NASA FIRMS has nothing here to link to).
+  url: z.url().optional(),
 
   tags: z.array(z.string()),
   relatedEventIds: z.array(z.string()).optional(),

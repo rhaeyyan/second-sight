@@ -44,10 +44,17 @@ describe('IronsightEventSchema — valid payloads', () => {
       location: { latitude: 35.6892, longitude: 51.389, precision: 'regional' },
       summary: 'Multiple outlets reporting an explosion.',
       originalLanguage: 'fa',
+      url: 'https://reuters.com/world/middle-east/some-article',
       relatedEventIds: ['gn-1-1760000000000'],
       rawPayload: { raw: 'unmodified feed item' },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('accepts an event with no per-report url — not every source has per-item links (e.g. sensors)', () => {
+    const result = IronsightEventSchema.safeParse(validEvent);
+    expect(result.success).toBe(true);
+    expect(result.data?.url).toBeUndefined();
   });
 });
 
@@ -86,6 +93,11 @@ describe('IronsightEventSchema — malformed payloads', () => {
       ...validEvent,
       source: { ...validEvent.source, url: 'not-a-url' },
     });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a malformed per-report url', () => {
+    const result = IronsightEventSchema.safeParse({ ...validEvent, url: 'not-a-url' });
     expect(result.success).toBe(false);
   });
 
