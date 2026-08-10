@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { fetchWithTimeout } from '@/lib/fetcher';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,54 +19,88 @@ const SYMBOLS = [
   { symbol: 'DX-Y.NYB', name: 'US Dollar Index' },
 ];
 
-async function fetchYahoo(sym: string) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
-  const res = await fetchWithTimeout(url, {
-    timeout: 8000,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-  });
-  if (!res.ok) throw new Error('Failed');
-  const data = await res.json();
-  return data?.chart?.result?.[0]?.meta;
+export interface MarketPrice {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  error?: boolean;
+}
+
+interface SymbolFetchResult {
+  price: MarketPrice;
+  health: SourceHealth;
+}
+
+/**
+ * Fetches one Yahoo Finance symbol. Returns per-symbol health rather than collapsing
+ * every failure into `{ error: true }` — with 11 symbols fetched independently, a single
+ * rate-limited or malformed response used to be indistinguishable from the rest.
+ */
+export async function fetchYahooSymbol(
+  s: { symbol: string; name: string },
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<SymbolFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+  const sourceId = `yahoo-finance:${s.symbol}`;
+  const errored: MarketPrice = { symbol: s.symbol, name: s.name, price: 0, change: 0, changePercent: 0, error: true };
+
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s.symbol)}?interval=1d&range=5d`;
+    const res = await fetchImpl(url, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    if (!res.ok) {
+      return {
+        price: errored,
+        health: { sourceId, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
+
+    const data = await res.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) {
+      return { price: errored, health: { sourceId, status: 'invalid-response', lastAttemptAt } };
+    }
+
+    const price = meta.regularMarketPrice ?? 0;
+    const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
+    const change = Math.round((price - prev) * 100) / 100;
+    const pct = prev ? Math.round(((price - prev) / prev) * 10000) / 100 : 0;
+
+    return {
+      price: {
+        symbol: s.symbol,
+        name: s.name,
+        price: Math.round(price * 100) / 100,
+        change,
+        changePercent: pct,
+      },
+      health: { sourceId, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt },
+    };
+  } catch {
+    return { price: errored, health: { sourceId, status: 'unavailable', lastAttemptAt } };
+  }
+}
+
+export async function fetchMarketPrices(
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<{ prices: MarketPrice[]; health: SourceHealth[] }> {
+  const results = await Promise.all(SYMBOLS.map(s => fetchYahooSymbol(s, opts)));
+  return { prices: results.map(r => r.price), health: results.map(r => r.health) };
 }
 
 export async function GET() {
-  try {
-    const markets = await Promise.all(
-      SYMBOLS.map(async (s) => {
-        try {
-          const meta = await fetchYahoo(s.symbol);
-          if (!meta) throw new Error('No data');
+  const { prices, health } = await fetchMarketPrices();
 
-          const price = meta.regularMarketPrice ?? 0;
-          const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
-          const change = Math.round((price - prev) * 100) / 100;
-          const pct = prev ? Math.round(((price - prev) / prev) * 10000) / 100 : 0;
-
-          return {
-            symbol: s.symbol,
-            name: s.name,
-            price: Math.round(price * 100) / 100,
-            change,
-            changePercent: pct,
-          };
-        } catch {
-          return {
-            symbol: s.symbol,
-            name: s.name,
-            price: 0,
-            change: 0,
-            changePercent: 0,
-            error: true,
-          };
-        }
-      })
-    );
-
-    return NextResponse.json(markets, {
-      headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=120' },
-    });
-  } catch {
-    return NextResponse.json([], { status: 500 });
-  }
+  return NextResponse.json(prices, {
+    headers: {
+      'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=120',
+      'X-Source-Health': JSON.stringify(health),
+    },
+  });
 }
