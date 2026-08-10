@@ -3,14 +3,34 @@ import { fetchWithTimeout, parseXML, getTextContent } from '@/lib/fetcher';
 import { isHebrew, translateFreeText } from '@/lib/hebrew';
 import { getConflictFromRequest } from '@/lib/conflicts';
 import type { NewsItem } from '@/types';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
 
 export const revalidate = 0;
 
-async function fetchRSS(feedUrl: string, source: string): Promise<NewsItem[]> {
+interface FeedFetchResult {
+  items: NewsItem[];
+  health: SourceHealth;
+}
+
+/**
+ * Fetches and parses a single RSS/Atom feed. Returns per-feed health rather than
+ * swallowing every failure into an empty array — with 20+ feeds aggregated via
+ * Promise.allSettled below, "this one feed is down" and "this one feed just has
+ * nothing new" used to be indistinguishable from the response alone.
+ */
+export async function fetchRSS(
+  feedUrl: string,
+  source: string,
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<FeedFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+
   try {
-    const res = await fetchWithTimeout(feedUrl, {
+    const res = await fetchImpl(feedUrl, {
       timeout: 8000,
       headers: {
         'User-Agent': 'IronSight/1.0 RSS Reader',
@@ -18,11 +38,23 @@ async function fetchRSS(feedUrl: string, source: string): Promise<NewsItem[]> {
       },
       redirect: 'follow',
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      return {
+        items: [],
+        health: {
+          sourceId: source,
+          status: res.status === 429 ? 'rate-limited' : 'unavailable',
+          lastAttemptAt,
+        },
+      };
+    }
     const text = await res.text();
 
-    // Skip if response is HTML (not RSS)
-    if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) return [];
+    // Skip if response is HTML (not RSS) — some feeds serve an error/maintenance
+    // page with a 200 status instead of the expected XML.
+    if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
+      return { items: [], health: { sourceId: source, status: 'invalid-response', lastAttemptAt } };
+    }
 
     const doc = parseXML(text);
     const items = doc.getElementsByTagName('item');
@@ -64,9 +96,12 @@ async function fetchRSS(feedUrl: string, source: string): Promise<NewsItem[]> {
         category: getTextContent(item, 'category') || undefined,
       });
     }
-    return results;
+    return {
+      items: results,
+      health: { sourceId: source, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt },
+    };
   } catch {
-    return [];
+    return { items: [], health: { sourceId: source, status: 'unavailable', lastAttemptAt } };
   }
 }
 
@@ -86,14 +121,12 @@ export async function GET(req: Request) {
     return relevanceKeywords.test(item.title) || relevanceKeywords.test(item.category || '');
   };
 
-  const results = await Promise.allSettled(
+  const results = await Promise.all(
     feeds.map(feed => fetchRSS(feed.url, feed.name))
   );
 
-  const allNews: NewsItem[] = results
-    .filter((r): r is PromiseFulfilledResult<NewsItem[]> => r.status === 'fulfilled')
-    .flatMap(r => r.value)
-    .filter(isRelevant);
+  const allNews: NewsItem[] = results.flatMap(r => r.items).filter(isRelevant);
+  const health = results.map(r => r.health);
 
   // Translate Hebrew titles to English
   const hebrewItems = allNews.filter(item => isHebrew(item.title));
@@ -126,6 +159,11 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json(deduped.slice(0, 100), {
-    headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      // One SourceHealth per feed queried. Not consumed by the UI yet (Phase 2), same
+      // as /api/conflicts's X-Source-Health — inspectable via devtools in the meantime.
+      'X-Source-Health': JSON.stringify(health),
+    },
   });
 }
