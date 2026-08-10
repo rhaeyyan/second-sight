@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchWithTimeout, parseXML, getTextContent } from '@/lib/fetcher';
 import { getConflictFromRequest } from '@/lib/conflicts';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,7 @@ function getAlertLevel(events: { severity: string; hoursAgo: number }[]): 'CLEAR
   return 'CLEAR';
 }
 
-interface CountryEvent {
+export interface CountryEvent {
   title: string;
   source: string;
   time: string;
@@ -59,73 +60,111 @@ interface CountryEvent {
   hoursAgo: number;
 }
 
+interface CountryQuery {
+  name: string;
+  flag: string;
+  query: string;
+}
+
+interface CountryFetchResult {
+  name: string;
+  flag: string;
+  events: CountryEvent[];
+  health: SourceHealth;
+}
+
+/** Fetches and scores one country's Google News query. Health is per-country since GET batches several. */
+export async function fetchCountryAlerts(
+  country: CountryQuery,
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<CountryFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
+  const sourceId = `regional-alerts:${country.name}`;
+
+  try {
+    const url = `https://news.google.com/rss/search?q=${country.query}&hl=en-US&gl=US&ceid=US:en`;
+    const res = await fetchImpl(url, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/rss+xml, text/xml, */*' },
+    });
+    if (!res.ok) {
+      return {
+        name: country.name,
+        flag: country.flag,
+        events: [],
+        health: { sourceId, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
+
+    const text = await res.text();
+    const doc = parseXML(text);
+    const items = doc.getElementsByTagName('item');
+    const events: CountryEvent[] = [];
+    const nowMs = now();
+
+    for (let j = 0; j < Math.min(items.length, 8); j++) {
+      const item = items[j];
+      let title = getTextContent(item, 'title');
+      const link = getTextContent(item, 'link');
+      const pubDate = getTextContent(item, 'pubDate');
+
+      // Strip Google News source suffix
+      const dashIdx = title.lastIndexOf(' - ');
+      const source = dashIdx > 0 ? title.substring(dashIdx + 3) : 'Google News';
+      if (dashIdx > 0) title = title.substring(0, dashIdx);
+
+      const pubTime = new Date(pubDate).getTime();
+      const hoursAgo = (nowMs - pubTime) / (1000 * 60 * 60);
+
+      events.push({
+        title,
+        source,
+        time: pubDate,
+        url: link,
+        severity: scoreSeverity(title),
+        hoursAgo: Math.round(hoursAgo * 10) / 10,
+      });
+    }
+
+    return {
+      name: country.name,
+      flag: country.flag,
+      events,
+      health: { sourceId, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt },
+    };
+  } catch {
+    return {
+      name: country.name,
+      flag: country.flag,
+      events: [],
+      health: { sourceId, status: 'unavailable', lastAttemptAt },
+    };
+  }
+}
+
 export async function GET(req: Request) {
   const { server } = getConflictFromRequest(req);
-  const countryQueries = server.countryQueries.map(c => ({ name: c.country, flag: c.flag, query: c.query }));
+  const countryQueries: CountryQuery[] = server.countryQueries.map(c => ({ name: c.country, flag: c.flag, query: c.query }));
 
   // Fetch 3 countries at a time to avoid rate limiting Google
   const results: { name: string; flag: string; events: CountryEvent[]; level: string }[] = [];
+  const health: SourceHealth[] = [];
 
   // Process in batches of 3
   for (let i = 0; i < countryQueries.length; i += 3) {
     const batch = countryQueries.slice(i, i + 3);
-    const batchResults = await Promise.allSettled(
-      batch.map(async (country) => {
-        const url = `https://news.google.com/rss/search?q=${country.query}&hl=en-US&gl=US&ceid=US:en`;
-        try {
-          const res = await fetchWithTimeout(url, {
-            timeout: 8000,
-            headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/rss+xml, text/xml, */*' },
-          });
-          if (!res.ok) return { ...country, events: [] };
+    const batchResults = await Promise.all(batch.map(country => fetchCountryAlerts(country)));
 
-          const text = await res.text();
-          const doc = parseXML(text);
-          const items = doc.getElementsByTagName('item');
-          const events: CountryEvent[] = [];
-          const now = Date.now();
-
-          for (let j = 0; j < Math.min(items.length, 8); j++) {
-            const item = items[j];
-            let title = getTextContent(item, 'title');
-            const link = getTextContent(item, 'link');
-            const pubDate = getTextContent(item, 'pubDate');
-
-            // Strip Google News source suffix
-            const dashIdx = title.lastIndexOf(' - ');
-            const source = dashIdx > 0 ? title.substring(dashIdx + 3) : 'Google News';
-            if (dashIdx > 0) title = title.substring(0, dashIdx);
-
-            const pubTime = new Date(pubDate).getTime();
-            const hoursAgo = (now - pubTime) / (1000 * 60 * 60);
-
-            events.push({
-              title,
-              source,
-              time: pubDate,
-              url: link,
-              severity: scoreSeverity(title),
-              hoursAgo: Math.round(hoursAgo * 10) / 10,
-            });
-          }
-
-          return { ...country, events };
-        } catch {
-          return { ...country, events: [] };
-        }
-      })
-    );
-
-    for (const r of batchResults) {
-      if (r.status === 'fulfilled') {
-        const c = r.value;
-        results.push({
-          name: c.name,
-          flag: c.flag,
-          events: c.events,
-          level: getAlertLevel(c.events),
-        });
-      }
+    for (const c of batchResults) {
+      health.push(c.health);
+      results.push({
+        name: c.name,
+        flag: c.flag,
+        events: c.events,
+        level: getAlertLevel(c.events),
+      });
     }
   }
 
@@ -137,6 +176,9 @@ export async function GET(req: Request) {
     alerts: results,
     updated: new Date().toISOString(),
   }, {
-    headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'X-Source-Health': JSON.stringify(health),
+    },
   });
 }
