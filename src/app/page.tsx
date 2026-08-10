@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import MetricsBar from '@/components/panels/MetricsBar';
 import ThreatClock from '@/components/panels/ThreatClock';
@@ -69,6 +70,9 @@ export default function Dashboard() {
           <MetricsBar />
           <div className="flex items-center gap-4 text-[9px] text-[var(--text-secondary)]">
             <ConflictToggle />
+            <Link href="/feed" className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--cyan)] transition-colors">
+              UNIFIED FEED
+            </Link>
             <span>SESSION {formatUptime(uptime)}</span>
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-pulse" />

@@ -178,3 +178,16 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* Unified Feed (/feed): Global Pause halts the header status dot's pulse as a visible
+   "this view is frozen" signal, and prefers-reduced-motion disables it outright regardless
+   of pause state — the first prefers-reduced-motion handling in the codebase. */
+.status-dot.is-paused {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot {
+    animation: none;
+  }
+}
