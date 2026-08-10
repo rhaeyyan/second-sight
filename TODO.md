@@ -13,7 +13,7 @@ Working task list for **IRONSIGHT**. Read this at the start of a work session an
 - [ ] `/api/conflicts`'s `toConflictEvent()` mapping in `route.ts` is a deliberate, commented compatibility shim — it exists so `ConflictFeed`/`ConflictMap` don't need touching yet. Remove it once Phase 2 migrates those panels to consume `IronsightEvent` directly; until then it's a second shape for the same data and should not be copied to other routes without a reason
 
 ### Correctness
-- [ ] `src/lib/hooks.ts:30` — `useCallback` omits `data` from its deps, so the "keep previous data if the response is empty" guard closes over a stale `data`. The guard silently stops working after the first render. Lint warns about this
+- [x] ~~`src/lib/hooks.ts:30` — `useCallback` omits `data` from its deps, so the "keep previous data if the response is empty" guard closes over a stale `data`~~ ✅ done 2026-08-09 — switched to the `setData(prev => ...)` functional form so the guard reads live state instead of the closure; regression test in `src/lib/hooks.test.ts`
 - [ ] Replace bare `catch { return [] }` in the API routes (e.g. `src/app/api/news/route.ts:68`) with explicit `SourceHealthStatus`. Right now "no events" and "the feed is broken" are indistinguishable in the UI
 
 ### Tooling

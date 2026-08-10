@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { timeAgo, formatChange, formatPrice } from '@/lib/hooks';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
+import { timeAgo, formatChange, formatPrice, useDataFeed } from '@/lib/hooks';
 
 // Offsets deliberately sit away from bucket boundaries (x.5 rather than x.0) so the
 // clock advancing between the test's Date.now() and the one inside timeAgo can't flip
@@ -48,5 +49,36 @@ describe('formatPrice', () => {
   it('groups thousands and pads to the requested precision', () => {
     expect(formatPrice(1234.5)).toBe('1,234.50');
     expect(formatPrice(1234.5678, 3)).toBe('1,234.568');
+  });
+});
+
+describe('useDataFeed', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the previous data when a later poll comes back empty, past the first render', async () => {
+    // Regression test: fetchData used to close over `data` with only `url` in its
+    // useCallback deps, so the "keep stale data on an empty response" guard always
+    // compared against the initial (null) data, silently disabling itself after the
+    // first render.
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: 1 }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+    const { result } = renderHook(() => useDataFeed<{ id: number }[]>('/api/test', 60000));
+
+    await waitFor(() => expect(result.current.data).toEqual([{ id: 1 }]));
+
+    await act(async () => {
+      await result.current.refetch();
+    });
+
+    expect(result.current.data).toEqual([{ id: 1 }]);
   });
 });

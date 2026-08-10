@@ -14,12 +14,13 @@ export function useDataFeed<T>(url: string, interval: number = 60000, initialDat
       const res = await fetch(bustUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      // Keep previous data if new response is empty (likely rate limited)
+      // Keep previous data if new response is empty (likely rate limited). Uses the
+      // functional setState form rather than closing over `data` directly, since this
+      // callback is memoized on `url` alone and would otherwise always compare against
+      // the data as of the render that created it.
       const isEmpty = Array.isArray(json) ? json.length === 0 :
                       json && typeof json === 'object' && 'posts' in json ? json.posts?.length === 0 : false;
-      if (!isEmpty || !data) {
-        setData(json);
-      }
+      setData(prev => (!isEmpty || !prev) ? json : prev);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
