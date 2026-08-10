@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server';
 import { fetchWithTimeout } from '@/lib/fetcher';
 import { translateFreeText } from '@/lib/hebrew';
 import { getConflictFromRequest } from '@/lib/conflicts';
+import type { SourceHealth } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
+
+const NEPTUN_SOURCE_ID = 'neptun';
 
 // Real-time drone / missile track tracker.
 // Provider: Neptun (neptun.in.ua) — free public JSON, no API key.
@@ -78,20 +81,31 @@ interface NeptunMarker {
   positions?: { lat: number; lng: number }[];
 }
 
-export async function GET(req: Request) {
-  const { server } = getConflictFromRequest(req);
+interface DroneFetchResult {
+  drones: Drone[];
+  ballisticThreat: boolean;
+  health: SourceHealth;
+}
 
-  // No drone source for this theater — return empty (panel/layer stays quiet)
-  if (server.droneProvider !== 'neptun') {
-    return NextResponse.json({ drones: [], count: 0, ballisticThreat: false, source: null, updated: new Date().toISOString() });
-  }
+export async function fetchNeptunDrones(
+  opts: { fetchImpl?: typeof fetchWithTimeout; now?: () => number } = {}
+): Promise<DroneFetchResult> {
+  const fetchImpl = opts.fetchImpl ?? fetchWithTimeout;
+  const now = opts.now ?? Date.now;
+  const lastAttemptAt = now();
 
   try {
-    const res = await fetchWithTimeout('https://neptun.in.ua/api/data', {
+    const res = await fetchImpl('https://neptun.in.ua/api/data', {
       timeout: 10000,
       headers: { 'User-Agent': 'IronSight/1.0', 'Accept': 'application/json' },
     });
-    if (!res.ok) throw new Error(`Neptun HTTP ${res.status}`);
+    if (!res.ok) {
+      return {
+        drones: [], ballisticThreat: false,
+        health: { sourceId: NEPTUN_SOURCE_ID, status: res.status === 429 ? 'rate-limited' : 'unavailable', lastAttemptAt },
+      };
+    }
+
     const data = await res.json();
     const markers: NeptunMarker[] = Array.isArray(data?.markers) ? data.markers
       : Array.isArray(data?.tracks) ? data.tracks : [];
@@ -117,24 +131,52 @@ export async function GET(req: Request) {
             count: typeof m.count === 'number' ? m.count : 1,
             place,
             text,
-            time: m.date || new Date().toISOString(),
+            time: m.date || new Date(lastAttemptAt).toISOString(),
             confidence: typeof m.confidence_0_100 === 'number' ? m.confidence_0_100 : 0,
             trail,
           };
         })
     );
 
-    return NextResponse.json({
+    return {
       drones,
-      count: drones.length,
       ballisticThreat: !!data?.ballistic_threat,
-      source: 'Neptun',
-      updated: new Date().toISOString(),
-    }, {
-      headers: { 'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=10' },
-    });
+      health: { sourceId: NEPTUN_SOURCE_ID, status: 'healthy', lastAttemptAt, lastSuccessAt: lastAttemptAt },
+    };
   } catch (err) {
     console.error('Neptun drone fetch error:', err);
-    return NextResponse.json({ drones: [], count: 0, ballisticThreat: false, source: 'Neptun', error: 'fetch failed', updated: new Date().toISOString() }, { status: 200 });
+    return {
+      drones: [], ballisticThreat: false,
+      health: { sourceId: NEPTUN_SOURCE_ID, status: 'unavailable', lastAttemptAt },
+    };
   }
+}
+
+export async function GET(req: Request) {
+  const { server } = getConflictFromRequest(req);
+
+  // No drone source for this theater — return empty (panel/layer stays quiet)
+  if (server.droneProvider !== 'neptun') {
+    const health: SourceHealth = { sourceId: NEPTUN_SOURCE_ID, status: 'paused', lastAttemptAt: Date.now() };
+    return NextResponse.json(
+      { drones: [], count: 0, ballisticThreat: false, source: null, updated: new Date().toISOString() },
+      { headers: { 'X-Source-Health': JSON.stringify(health) } }
+    );
+  }
+
+  const { drones, ballisticThreat, health } = await fetchNeptunDrones();
+
+  return NextResponse.json({
+    drones,
+    count: drones.length,
+    ballisticThreat,
+    source: 'Neptun',
+    updated: new Date().toISOString(),
+    ...(health.status !== 'healthy' ? { error: 'fetch failed' } : {}),
+  }, {
+    headers: {
+      'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=10',
+      'X-Source-Health': JSON.stringify(health),
+    },
+  });
 }
