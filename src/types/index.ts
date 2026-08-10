@@ -1,32 +1,33 @@
+/**
+ * IronsightEvent classification (Phase 0 decision, 2026-08-09):
+ *
+ * Of the ~12 types this file used to hold, only the two below are actually imported
+ * anywhere (`NewsItem` by /api/news + NewsFeed, `ConflictEvent` by /api/conflicts +
+ * ConflictFeed/ConflictMap) — the rest (OilPrice, MarketData, CurrencyRate, FlightData,
+ * ShipData, SeismicEvent, GasPrice, CyberEvent, HumanitarianReport, NuclearFacility,
+ * ThreatLevel, DashboardMetrics) were dead: every route that handles that domain
+ * (markets, oil, crypto, ships, flights, ...) already defines its own local,
+ * route-specific interface instead (e.g. `NavalVessel` in ships/route.ts,
+ * `AircraftState` in flights/route.ts). They've been deleted rather than migrated.
+ *
+ * That dead-vs-live split also answers the "IronsightEvent vs. bespoke" question:
+ * - `NewsItem` and `ConflictEvent` are discrete, narrated happenings (a headline, a
+ *   strike report) — they belong on the `IronsightEvent` migration path. `ConflictEvent`
+ *   is already mid-migration behind the `toConflictEvent()` compatibility shim in
+ *   /api/conflicts/route.ts; `NewsItem` is the next candidate, same adapter pattern as
+ *   `src/lib/events/adapters/googleNewsConflict.ts`.
+ * - Continuously-updating snapshots (market/oil/crypto prices, ship/aircraft positions)
+ *   and static registries (nuclear facilities, the ThreatClock timezone table) are not
+ *   events and are not going to become `IronsightEvent`s — there's no "occurred at"
+ *   moment to report, just a current value. They stay bespoke, defined locally in the
+ *   route or config file that owns them, per `draft-implementation-plan.md` §1.
+ */
 export interface NewsItem {
   title: string;
   link: string;
   source: string;
   pubDate: string;
   category?: string;
-}
-
-export interface OilPrice {
-  type: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  currency: string;
-  updated: string;
-}
-
-export interface MarketData {
-  symbol: string;
-  name: string;
-  price: number;
-  change: number;
-  changePercent: number;
-}
-
-export interface CurrencyRate {
-  pair: string;
-  rate: number;
-  change: number;
 }
 
 export interface ConflictEvent {
@@ -39,84 +40,4 @@ export interface ConflictEvent {
   description: string;
   source: string;
   fatalities?: number;
-}
-
-export interface FlightData {
-  callsign: string;
-  origin: string;
-  lat: number;
-  lon: number;
-  altitude: number;
-  heading: number;
-  speed: number;
-  type?: string;
-}
-
-export interface ShipData {
-  name: string;
-  mmsi: string;
-  type: string;
-  lat: number;
-  lon: number;
-  speed: number;
-  heading: number;
-  destination?: string;
-}
-
-export interface SeismicEvent {
-  id: string;
-  magnitude: number;
-  location: string;
-  lat: number;
-  lon: number;
-  depth: number;
-  time: string;
-  type: string;
-}
-
-export interface GasPrice {
-  state: string;
-  regular: number;
-  midgrade: number;
-  premium: number;
-  diesel: number;
-}
-
-export interface CyberEvent {
-  date: string;
-  actor: string;
-  target: string;
-  type: string;
-  description: string;
-  source: string;
-}
-
-export interface HumanitarianReport {
-  title: string;
-  date: string;
-  country: string;
-  source: string;
-  url: string;
-  type: string;
-}
-
-export interface NuclearFacility {
-  name: string;
-  country: string;
-  type: string;
-  status: string;
-  lat: number;
-  lon: number;
-}
-
-export type ThreatLevel = 'LOW' | 'GUARDED' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
-
-export interface DashboardMetrics {
-  oilPrice: number;
-  oilChange: number;
-  threatLevel: ThreatLevel;
-  activeConflicts: number;
-  daysSinceEscalation: number;
-  avgGasPrice: number;
-  gasChange: number;
 }
