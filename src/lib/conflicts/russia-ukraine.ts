@@ -355,5 +355,7 @@ export const russiaUkraine: ConflictConfig = {
 
     alertProvider: 'alertsua',
     droneProvider: 'neptun',
+
+    iodaCountries: ['UA', 'RU', 'BY'],
   },
 };

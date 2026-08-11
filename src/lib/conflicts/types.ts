@@ -179,6 +179,10 @@ export interface ServerConfig {
 
   // drones route: real-time drone/missile track provider (undefined = none)
   droneProvider?: 'neptun';
+
+  // ioda adapter: ISO 3166-1 alpha-2 codes to query for connectivity-outage signals.
+  // Mirrors countryAttribution's belligerent set rather than inventing a new one.
+  iodaCountries: string[];
 }
 
 export interface ConflictConfig {

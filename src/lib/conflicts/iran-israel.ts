@@ -325,5 +325,7 @@ export const iranIsrael: ConflictConfig = {
 
     alertProvider: 'tzevaadom',
     // No free real-time drone-track source for this theater
+
+    iodaCountries: ['IR', 'IL', 'LB', 'SY', 'YE'],
   },
 };
