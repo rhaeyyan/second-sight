@@ -2,6 +2,57 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import ConflictFeed from './ConflictFeed';
 import { ConflictProvider } from '@/lib/conflicts/context';
+import type { IronsightEvent } from '@/lib/events/schema';
+
+const MOCK_NOW = 1_760_000_000_000;
+
+function event(overrides: Partial<IronsightEvent> = {}): IronsightEvent {
+  return {
+    id: 'evt-1',
+    source: { id: 'google-news-conflict', name: 'Google News', sourceType: 'media' },
+    type: 'STRIKE',
+    theater: 'iran-israel',
+    region: 'Tel Aviv',
+    reportedAt: MOCK_NOW,
+    ingestedAt: MOCK_NOW,
+    severity: 'high',
+    confidence: 'medium',
+    verificationStatus: 'single-source',
+    title: 'Missile strike reported near Tel Aviv',
+    tags: ['strike'],
+    ...overrides,
+  };
+}
+
+describe('ConflictFeed', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('renders a fetched IronsightEvent through the field mapping (title, region, source name)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [event()],
+        headers: new Headers(),
+      }),
+    );
+
+    render(
+      <ConflictProvider>
+        <ConflictFeed />
+      </ConflictProvider>
+    );
+
+    await waitFor(() => expect(screen.getByText('1 events')).toBeInTheDocument());
+    expect(screen.getByText('Missile strike reported near Tel Aviv')).toBeInTheDocument();
+    expect(screen.getByText('Tel Aviv')).toBeInTheDocument();
+    expect(screen.getByText('via Google News')).toBeInTheDocument();
+    expect(screen.getByText('STRIKE')).toBeInTheDocument();
+  });
+});
 
 // Phase 1 exit criteria: "source failures degrade gracefully without crashing the
 // dashboard." These don't test the fetch/adapter layer (covered elsewhere) — they

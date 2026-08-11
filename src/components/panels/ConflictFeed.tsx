@@ -1,7 +1,7 @@
 'use client';
 
 import { useConflictFeed, timeAgo, useTick } from '@/lib/hooks';
-import type { ConflictEvent } from '@/types';
+import type { IronsightEvent } from '@/lib/events/schema';
 
 const TYPE_COLORS: Record<string, string> = {
   STRIKE: 'var(--red)',
@@ -13,13 +13,11 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export default function ConflictFeed() {
-  const { data: rawEvents, loading } = useConflictFeed<ConflictEvent[]>('/api/conflicts', 180000);
+  const { data: rawEvents, loading } = useConflictFeed<IronsightEvent[]>('/api/conflicts', 180000);
   useTick(15000);
 
   // Sort most recent first
-  const events = rawEvents ? [...rawEvents].sort((a, b) =>
-    new Date(b.date).getTime() - new Date(a.date).getTime()
-  ) : null;
+  const events = rawEvents ? [...rawEvents].sort((a, b) => b.reportedAt - a.reportedAt) : null;
 
   return (
     <div className="panel h-full flex flex-col">
@@ -58,17 +56,17 @@ export default function ConflictFeed() {
                     {event.type}
                   </span>
                   <span className="text-[9px] text-[var(--text-secondary)]">
-                    {event.location}
+                    {event.region}
                   </span>
                   <span className="text-[9px] text-[var(--text-secondary)] ml-auto">
-                    {timeAgo(event.date)}
+                    {timeAgo(new Date(event.reportedAt))}
                   </span>
                 </div>
                 <p className="text-[11px] leading-tight text-[var(--text-primary)]">
-                  {event.description}
+                  {event.title}
                 </p>
                 <span className="text-[8px] text-[var(--text-secondary)]">
-                  via {event.source}
+                  via {event.source.name}
                 </span>
               </div>
             );

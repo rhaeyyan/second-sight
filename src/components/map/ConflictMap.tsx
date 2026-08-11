@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useConflictFeed } from '@/lib/hooks';
 import { useConflict } from '@/lib/conflicts/context';
 import type { ColorMatchRule } from '@/lib/conflicts';
+import type { IronsightEvent } from '@/lib/events/schema';
+import { escapeHtml } from '@/components/feed/utils';
 
 let L: typeof import('leaflet') | null = null;
 
@@ -51,17 +53,6 @@ interface AlertData {
     locations: string[];
     time: string;
   }[];
-}
-
-interface ConflictEvent {
-  id: string;
-  date: string;
-  type: string;
-  location: string;
-  lat: number;
-  lon: number;
-  description: string;
-  source: string;
 }
 
 interface StrikeData {
@@ -278,7 +269,7 @@ export default function ConflictMap({ className }: MapProps) {
   const { data: flights } = useConflictFeed<FlightData>('/api/flights', 180000);
   const { data: naval } = useConflictFeed<NavalData>('/api/ships', 300000);
   const { data: alerts } = useConflictFeed<AlertData>('/api/alerts', 15000);
-  const { data: conflicts } = useConflictFeed<ConflictEvent[]>('/api/conflicts', 180000);
+  const { data: conflicts } = useConflictFeed<IronsightEvent[]>('/api/conflicts', 180000);
   const { data: strikes } = useConflictFeed<StrikeData[]>('/api/strikes', 120000);
   const { data: telegram } = useConflictFeed<TelegramData>('/api/telegram', 60000);
   const { data: droneData } = useConflictFeed<DroneData>('/api/drones', 20000);
@@ -500,7 +491,7 @@ export default function ConflictMap({ className }: MapProps) {
       const countryKey = city.country.toLowerCase();
       const recentStrikes = (conflicts || [])
         .filter(e => {
-          const text = `${e.description} ${e.location}`.toLowerCase();
+          const text = `${e.title} ${e.region ?? ''}`.toLowerCase();
           return text.includes(cityKey) || text.includes(countryKey);
         })
         .slice(0, 3);
@@ -533,11 +524,12 @@ export default function ConflictMap({ className }: MapProps) {
         html += `<div style="margin-top:6px;border-top:1px solid #ddd;padding-top:4px;">`;
         html += `<strong style="color:#ff6600;font-size:10px;">RECENT EVENTS</strong><br/>`;
         recentStrikes.forEach(s => {
-          const timeStr = new Date(s.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const timeStr = new Date(s.reportedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          const title = s.title.length > 80 ? `${s.title.substring(0, 80)}...` : s.title;
           html += `<div style="margin:2px 0;font-size:10px;">`;
           html += `<span style="color:${s.type === 'STRIKE' ? '#ff3300' : s.type === 'DRONE' ? '#ff6600' : '#666'};font-weight:bold;">${s.type}</span> `;
-          html += `${s.description.substring(0, 80)}${s.description.length > 80 ? '...' : ''}`;
-          html += `<br/><span style="color:#999;font-size:9px;">${s.source} • ${timeStr}</span>`;
+          html += escapeHtml(title);
+          html += `<br/><span style="color:#999;font-size:9px;">${escapeHtml(s.source.name)} • ${timeStr}</span>`;
           html += `</div>`;
         });
         html += `</div>`;
@@ -876,7 +868,7 @@ export default function ConflictMap({ className }: MapProps) {
     if (conflicts) {
       conflicts.forEach(e => {
         if (e.type === 'STRIKE' || e.type === 'DRONE') {
-          allStrikes.push({ title: e.description, date: e.date, source: e.source, type: e.type });
+          allStrikes.push({ title: e.title, date: new Date(e.reportedAt).toISOString(), source: e.source.name, type: e.type });
         }
       });
     }
