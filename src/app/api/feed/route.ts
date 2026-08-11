@@ -4,6 +4,7 @@ import { isHebrew, translateFreeText } from '@/lib/hebrew';
 import { createGoogleNewsConflictAdapter } from '@/lib/events/adapters/googleNewsConflict';
 import { createNewsRssAdapter } from '@/lib/events/adapters/newsRss';
 import { createFirmsFiresAdapter } from '@/lib/events/adapters/firmsFires';
+import { createOpenMeteoWeatherAdapter } from '@/lib/events/adapters/openMeteoWeather';
 import type { SourceAdapterResult } from '@/lib/events/sourceAdapter';
 
 export const dynamic = 'force-dynamic';
@@ -29,11 +30,12 @@ function resolveResult(
 }
 
 export async function GET(req: Request) {
-  const { key, server } = getConflictFromRequest(req);
+  const { key, client, server } = getConflictFromRequest(req);
 
   const conflictsAdapter = createGoogleNewsConflictAdapter(key, server);
   const newsAdapter = createNewsRssAdapter(key, server);
   const firmsAdapter = createFirmsFiresAdapter(key, server.firesBBox);
+  const weatherAdapter = createOpenMeteoWeatherAdapter(key, client.mapCenter);
 
   // This route intentionally re-fetches the same upstream feeds /api/conflicts and
   // /api/news already poll independently — there is no shared cache between routes.
@@ -41,16 +43,18 @@ export async function GET(req: Request) {
   //
   // Promise.allSettled rather than Promise.all: one source failing must not take the
   // merged feed down with it. Each adapter is scoped independently below via
-  // resolveResult, so a rejection on one leaves the other two sources' events intact.
-  const [conflictsSettled, newsSettled, firmsSettled] = await Promise.allSettled([
+  // resolveResult, so a rejection on one leaves the other three sources' events intact.
+  const [conflictsSettled, newsSettled, firmsSettled, weatherSettled] = await Promise.allSettled([
     conflictsAdapter.fetch(),
     newsAdapter.fetch(),
     firmsAdapter.fetch(),
+    weatherAdapter.fetch(),
   ]);
 
   const conflictsResult = resolveResult(conflictsAdapter.sourceId, conflictsSettled);
   const newsResult = resolveResult(newsAdapter.sourceId, newsSettled);
   const firmsResult = resolveResult(firmsAdapter.sourceId, firmsSettled);
+  const weatherResult = resolveResult(weatherAdapter.sourceId, weatherSettled);
 
   // Preserve untranslated Hebrew news titles before overwriting `title` — same
   // originalTitle/title ordering as threatOriginal/threat in src/app/api/alerts/route.ts.
@@ -71,9 +75,12 @@ export async function GET(req: Request) {
     });
   }
 
-  const events = [...conflictsResult.events, ...newsResult.events, ...firmsResult.events].sort(
-    (a, b) => b.reportedAt - a.reportedAt
-  );
+  const events = [
+    ...conflictsResult.events,
+    ...newsResult.events,
+    ...firmsResult.events,
+    ...weatherResult.events,
+  ].sort((a, b) => b.reportedAt - a.reportedAt);
 
   return NextResponse.json(events, {
     headers: {
@@ -82,6 +89,7 @@ export async function GET(req: Request) {
         conflictsResult.health,
         newsResult.health,
         firmsResult.health,
+        weatherResult.health,
       ]),
     },
   });
