@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { UnifiedFeedState } from '@/lib/events/useUnifiedFeed';
 import { useConflict } from '@/lib/conflicts/context';
+import { CONFLICT_KEYS } from '@/lib/conflicts';
 import { EventSeveritySchema, type EventSeverity, type IronsightEvent } from '@/lib/events/schema';
 import FeedTable from './FeedTable';
 
@@ -69,7 +70,7 @@ interface UnifiedFeedProps {
 
 export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
   const { config } = useConflict();
-  const { events, loading, error, paused, togglePause, newSinceCount } = feedState;
+  const { events, loading, error, paused, togglePause, newSinceCount, allTheaters, toggleAllTheaters } = feedState;
 
   const [view, setView] = useState<'table' | 'map'>('table');
 
@@ -81,6 +82,7 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedSeverities, setSelectedSeverities] = useState<Set<EventSeverity>>(new Set());
   const [selectedSourceTypes, setSelectedSourceTypes] = useState<Set<SourceType>>(new Set());
+  const [selectedTheaters, setSelectedTheaters] = useState<Set<string>>(new Set());
 
   const availableTypes = useMemo(
     () => Array.from(new Set(events.map((event) => event.type))).sort(),
@@ -92,9 +94,10 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
       .filter((event) => selectedTypes.size === 0 || selectedTypes.has(event.type))
       .filter((event) => selectedSeverities.size === 0 || selectedSeverities.has(event.severity))
       .filter((event) => selectedSourceTypes.size === 0 || selectedSourceTypes.has(event.source.sourceType))
+      .filter((event) => selectedTheaters.size === 0 || selectedTheaters.has(event.theater))
       .slice()
       .sort((a, b) => b.reportedAt - a.reportedAt);
-  }, [events, selectedTypes, selectedSeverities, selectedSourceTypes]);
+  }, [events, selectedTypes, selectedSeverities, selectedSourceTypes, selectedTheaters]);
 
   return (
     <div className="panel h-full flex flex-col">
@@ -140,6 +143,20 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
           </button>
         )}
 
+        <button
+          type="button"
+          aria-pressed={allTheaters}
+          onClick={toggleAllTheaters}
+          className="text-[9px] px-2 py-1 rounded border transition-colors"
+          style={{
+            color: allTheaters ? 'var(--cyan)' : 'var(--text-secondary)',
+            borderColor: allTheaters ? 'var(--cyan)' : 'var(--border-color)',
+            background: allTheaters ? 'rgba(0,212,255,0.1)' : 'transparent',
+          }}
+        >
+          {allTheaters ? 'All Theaters' : 'This Theater'}
+        </button>
+
         <div role="group" aria-label="View" className="flex gap-1 ml-auto">
           <button
             type="button"
@@ -177,6 +194,10 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
           onToggle={(value) => setSelectedSeverities((prev) => toggleInSet(prev, value))} />
         <FilterFieldset legend="Source Type" options={SOURCE_TYPES} selected={selectedSourceTypes}
           onToggle={(value) => setSelectedSourceTypes((prev) => toggleInSet(prev, value))} />
+        {allTheaters && (
+          <FilterFieldset legend="Theater" options={CONFLICT_KEYS} selected={selectedTheaters}
+            onToggle={(value) => setSelectedTheaters((prev) => toggleInSet(prev, value))} />
+        )}
       </div>
 
       {error && (
@@ -192,9 +213,14 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
           ))}
         </div>
       ) : view === 'table' ? (
-        <FeedTable events={filteredEvents} />
+        <FeedTable events={filteredEvents} showTheater={allTheaters} />
       ) : (
-        <FeedMap events={filteredEvents} center={config.client.mapCenter} zoom={config.client.mapZoom} />
+        <FeedMap
+          events={filteredEvents}
+          center={config.client.mapCenter}
+          zoom={config.client.mapZoom}
+          autoFitBounds={allTheaters}
+        />
       )}
     </div>
   );

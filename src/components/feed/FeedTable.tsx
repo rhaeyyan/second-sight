@@ -6,6 +6,10 @@ import { SEVERITY_COLORS, isRtlLanguage } from './utils';
 
 interface FeedTableProps {
   events: readonly IronsightEvent[];
+  /** Adds a Theater column. Off by default — meaningless (and just noise) when only one
+   *  theater's events are ever shown, so callers only pass this when cross-theater
+   *  viewing is active. */
+  showTheater?: boolean;
 }
 
 /**
@@ -13,7 +17,7 @@ interface FeedTableProps {
  * Map/Table parity requirement means this needs to be a genuinely usable table for screen
  * reader and keyboard users, not a visual approximation of one.
  */
-export default function FeedTable({ events }: FeedTableProps) {
+export default function FeedTable({ events, showTheater = false }: FeedTableProps) {
   if (events.length === 0) {
     return (
       <div className="p-4 text-center text-[var(--text-secondary)] text-xs">
@@ -32,6 +36,7 @@ export default function FeedTable({ events }: FeedTableProps) {
             <th scope="col" className="px-2 py-1.5 font-normal whitespace-nowrap">Severity</th>
             <th scope="col" className="px-2 py-1.5 font-normal whitespace-nowrap">Type</th>
             <th scope="col" className="px-2 py-1.5 font-normal whitespace-nowrap">Source</th>
+            {showTheater && <th scope="col" className="px-2 py-1.5 font-normal whitespace-nowrap">Theater</th>}
             <th scope="col" className="px-2 py-1.5 font-normal">Title</th>
           </tr>
         </thead>
@@ -57,6 +62,11 @@ export default function FeedTable({ events }: FeedTableProps) {
                 <td className="px-2 py-1.5 text-[10px] text-[var(--text-secondary)] whitespace-nowrap">
                   {event.source.name}
                 </td>
+                {showTheater && (
+                  <td className="px-2 py-1.5 text-[9px] text-[var(--text-secondary)] whitespace-nowrap">
+                    {event.theater}
+                  </td>
+                )}
                 <td className="px-2 py-1.5 text-[11px] text-[var(--text-primary)]">
                   {event.url ? (
                     <a

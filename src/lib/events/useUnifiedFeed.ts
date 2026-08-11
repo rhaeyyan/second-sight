@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConflict } from '@/lib/conflicts/context';
+import { CONFLICT_KEYS } from '@/lib/conflicts';
 import { createEventStore, type EventStore } from './eventStore';
 import type { IronsightEvent } from './schema';
 import type { SourceHealth } from './sourceAdapter';
@@ -18,6 +19,11 @@ export interface UnifiedFeedState {
    *  panel) that need to resolve ids or read the full accumulated set independent of
    *  this hook's own paused/frozen `events` snapshot. */
   store: EventStore;
+  /** False (default) fetches only the globally active theater, matching every other
+   *  panel. True fans out to every theater in CONFLICT_KEYS — opt-in, not a silent
+   *  default change, since it doubles (and will keep growing with) outbound polling. */
+  allTheaters: boolean;
+  toggleAllTheaters: () => void;
 }
 
 const DEFAULT_INTERVAL = 120000;
@@ -53,6 +59,9 @@ export function useUnifiedFeed(interval: number = DEFAULT_INTERVAL): UnifiedFeed
   const pausedRef = useRef(false);
   // The id set captured at the moment pausing began. null while not paused.
   const snapshotIdsRef = useRef<Set<string> | null>(null);
+  // Same synchronous-read reasoning as pausedRef, for the same reason: toggling this
+  // shouldn't tear down and restart the poll interval.
+  const allTheatersRef = useRef(false);
 
   const [events, setEvents] = useState<readonly IronsightEvent[]>(() => storeRef.current!.getAll());
   const [health, setHealth] = useState<SourceHealth[]>([]);
@@ -60,38 +69,67 @@ export function useUnifiedFeed(interval: number = DEFAULT_INTERVAL): UnifiedFeed
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [newSinceCount, setNewSinceCount] = useState(0);
+  const [allTheaters, setAllTheaters] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const url = `/api/feed?conflict=${key}`;
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const incoming: IronsightEvent[] = Array.isArray(json) ? json : [];
-      storeRef.current!.add(incoming);
+      const keysToFetch = allTheatersRef.current ? CONFLICT_KEYS : [key];
 
-      const healthHeader = res.headers.get('X-Source-Health');
-      if (healthHeader) {
-        try {
-          const parsedHealth = JSON.parse(healthHeader);
-          if (Array.isArray(parsedHealth)) setHealth(parsedHealth);
-        } catch {
-          // Malformed header — keep whatever health we had rather than discarding it.
-        }
-      }
+      const results = await Promise.allSettled(
+        keysToFetch.map(async (k) => {
+          const res = await fetch(`/api/feed?conflict=${k}`, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = await res.json();
+          const events: IronsightEvent[] = Array.isArray(json) ? json : [];
 
-      const all = storeRef.current!.getAll();
-      if (pausedRef.current) {
-        const snapshotIds = snapshotIdsRef.current;
-        if (snapshotIds) {
-          setNewSinceCount(all.filter((event) => !snapshotIds.has(event.id)).length);
+          let health: SourceHealth[] = [];
+          const healthHeader = res.headers.get('X-Source-Health');
+          if (healthHeader) {
+            try {
+              const parsed = JSON.parse(healthHeader);
+              if (Array.isArray(parsed)) health = parsed;
+            } catch {
+              // Malformed header — treat as no health info for this theater rather than
+              // failing the whole fetch over it.
+            }
+          }
+          return { events, health };
+        })
+      );
+
+      // A single theater's fetch failing (e.g. a transient timeout) must not blank out
+      // the other theater's already-successful data — only set `error` if every theater
+      // failed, mirroring googleNewsConflict.ts's allFailed check for its own multi-query
+      // Promise.allSettled.
+      const allFailed = results.every((r) => r.status === 'rejected');
+
+      if (!allFailed) {
+        const incoming: IronsightEvent[] = [];
+        const healthEntries: SourceHealth[] = [];
+        for (const r of results) {
+          if (r.status === 'fulfilled') {
+            incoming.push(...r.value.events);
+            healthEntries.push(...r.value.health);
+          }
         }
+        storeRef.current!.add(incoming);
+        setHealth(healthEntries);
+
+        const all = storeRef.current!.getAll();
+        if (pausedRef.current) {
+          const snapshotIds = snapshotIdsRef.current;
+          if (snapshotIds) {
+            setNewSinceCount(all.filter((event) => !snapshotIds.has(event.id)).length);
+          }
+        } else {
+          setEvents(all);
+        }
+        setError(null);
       } else {
-        setEvents(all);
+        const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+        const reason = firstRejection?.reason;
+        setError(reason instanceof Error ? reason.message : 'Failed to fetch');
       }
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch');
     } finally {
       setLoading(false);
     }
@@ -122,5 +160,27 @@ export function useUnifiedFeed(interval: number = DEFAULT_INTERVAL): UnifiedFeed
     });
   }, []);
 
-  return { events, health, loading, error, paused, togglePause, newSinceCount, store: storeRef.current };
+  const toggleAllTheaters = useCallback(() => {
+    setAllTheaters((prev) => {
+      const next = !prev;
+      allTheatersRef.current = next;
+      return next;
+    });
+    // Don't make the user wait up to `interval` ms to see the other theater(s)' events
+    // after opting in — same reasoning as the mount effect's own immediate fetchData().
+    fetchData();
+  }, [fetchData]);
+
+  return {
+    events,
+    health,
+    loading,
+    error,
+    paused,
+    togglePause,
+    newSinceCount,
+    store: storeRef.current,
+    allTheaters,
+    toggleAllTheaters,
+  };
 }

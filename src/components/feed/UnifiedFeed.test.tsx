@@ -154,6 +154,7 @@ describe('UnifiedFeed', () => {
     const user = userEvent.setup();
 
     const pauseButton = screen.getByRole('button', { name: 'Pause' });
+    const scopeButton = screen.getByRole('button', { name: 'This Theater' });
     const tableButton = screen.getByRole('button', { name: 'Table' });
     const mapButton = screen.getByRole('button', { name: 'Map' });
     const strikeCheckbox = screen.getByRole('checkbox', { name: 'strike' });
@@ -163,6 +164,7 @@ describe('UnifiedFeed', () => {
 
     const mustReach = [
       pauseButton,
+      scopeButton,
       tableButton,
       mapButton,
       strikeCheckbox,
@@ -199,6 +201,28 @@ describe('UnifiedFeed', () => {
 
     expect(pauseButton).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  // The cross-theater toggle follows the same aria-pressed + keyboard-operable pattern
+  // as Pause — proven separately here rather than folded into the Pause test above so a
+  // regression in either control fails with an unambiguous name.
+  it('toggles the theater scope via Enter while the button is focused, and reveals the Theater filter', async () => {
+    stubFeedFetch(FIXTURE_EVENTS);
+    await renderFeed();
+    const user = userEvent.setup();
+
+    const scopeButton = screen.getByRole('button', { name: 'This Theater' });
+    expect(scopeButton).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('group', { name: 'Theater' })).not.toBeInTheDocument();
+
+    scopeButton.focus();
+    expect(scopeButton).toHaveFocus();
+    await user.keyboard('{Enter}');
+
+    expect(scopeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'All Theaters' })).toBeInTheDocument();
+    // Only meaningful once more than one theater's events can be shown.
+    expect(screen.getByRole('group', { name: 'Theater' })).toBeInTheDocument();
   });
 
   // Filter checkboxes must be real, labelled form controls operable with Space — not

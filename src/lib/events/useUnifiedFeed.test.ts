@@ -61,6 +61,21 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(ConflictProvider, null, children);
 }
 
+/**
+ * Responds per-theater based on the `?conflict=` query param, so allTheaters tests can
+ * assert on merging/partial-failure behavior across multiple concurrent requests — the
+ * simple queueResponses() helper above is URL-agnostic and can't distinguish them.
+ * ConflictProvider defaults to 'iran-israel' (@/lib/conflicts' DEFAULT_CONFLICT).
+ */
+function mockByTheater(fetchMock: ReturnType<typeof vi.fn>, responses: Record<string, IronsightEvent[] | Error>) {
+  fetchMock.mockImplementation(async (url: string) => {
+    const theater = new URL(url, 'http://localhost').searchParams.get('conflict') ?? '';
+    const entry = responses[theater];
+    if (entry instanceof Error) throw entry;
+    return jsonResponse(entry ?? []);
+  });
+}
+
 describe('useUnifiedFeed', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -217,6 +232,91 @@ describe('useUnifiedFeed', () => {
     );
     // The hook's own `events` is still pinned to the pre-pause snapshot.
     expect(result.current.events.map((e) => e.id)).toEqual(['a']);
+  });
+
+  describe('allTheaters', () => {
+    it('defaults to false and fetches only the active theater', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      mockByTheater(fetchMock, {
+        'iran-israel': [makeEvent({ id: 'ii-1' })],
+        'russia-ukraine': [makeEvent({ id: 'ru-1', theater: 'russia-ukraine' })],
+      });
+
+      const { result } = renderHook(() => useUnifiedFeed(INTERVAL), { wrapper });
+
+      await waitFor(() => expect(result.current.events.map((e) => e.id)).toEqual(['ii-1']), WAIT_OPTS);
+      expect(result.current.allTheaters).toBe(false);
+    });
+
+    it('toggling on immediately fetches every theater and merges their events', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      mockByTheater(fetchMock, {
+        'iran-israel': [makeEvent({ id: 'ii-1' })],
+        'russia-ukraine': [makeEvent({ id: 'ru-1', theater: 'russia-ukraine' })],
+      });
+
+      const { result } = renderHook(() => useUnifiedFeed(INTERVAL), { wrapper });
+      await waitFor(() => expect(result.current.events.map((e) => e.id)).toEqual(['ii-1']), WAIT_OPTS);
+
+      act(() => result.current.toggleAllTheaters());
+      expect(result.current.allTheaters).toBe(true);
+
+      await waitFor(
+        () => expect(result.current.events.map((e) => e.id).sort()).toEqual(['ii-1', 'ru-1']),
+        WAIT_OPTS
+      );
+    });
+
+    it('keeps the successful theater\'s events and error null when only one theater fails', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      mockByTheater(fetchMock, { 'iran-israel': [makeEvent({ id: 'ii-1' })] });
+
+      const { result } = renderHook(() => useUnifiedFeed(INTERVAL), { wrapper });
+      await waitFor(() => expect(result.current.events.map((e) => e.id)).toEqual(['ii-1']), WAIT_OPTS);
+
+      mockByTheater(fetchMock, {
+        'iran-israel': [makeEvent({ id: 'ii-1' })],
+        'russia-ukraine': new Error('network unreachable'),
+      });
+      act(() => result.current.toggleAllTheaters());
+
+      await waitFor(() => expect(result.current.allTheaters).toBe(true), WAIT_OPTS);
+      // Give the settled Promise.allSettled round a tick to land.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(result.current.events.map((e) => e.id)).toEqual(['ii-1']);
+      expect(result.current.error).toBeNull();
+    });
+
+    it('toggling back off returns to fetching only the active theater on the next tick', async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      mockByTheater(fetchMock, {
+        'iran-israel': [makeEvent({ id: 'ii-1' })],
+        'russia-ukraine': [makeEvent({ id: 'ru-1', theater: 'russia-ukraine' })],
+      });
+
+      const { result } = renderHook(() => useUnifiedFeed(INTERVAL), { wrapper });
+      await waitFor(() => expect(result.current.events.map((e) => e.id)).toEqual(['ii-1']), WAIT_OPTS);
+
+      act(() => result.current.toggleAllTheaters());
+      await waitFor(
+        () => expect(result.current.events.map((e) => e.id).sort()).toEqual(['ii-1', 'ru-1']),
+        WAIT_OPTS
+      );
+
+      act(() => result.current.toggleAllTheaters());
+      expect(result.current.allTheaters).toBe(false);
+
+      // Let any all-theaters fetch already in flight at the moment of toggling off
+      // fully settle, so it can't land in the call log after mockClear() below and be
+      // mistaken for a call made under the new (single-theater) state.
+      await new Promise((resolve) => setTimeout(resolve, INTERVAL + 40));
+      fetchMock.mockClear();
+
+      await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0), WAIT_OPTS);
+      const urls = fetchMock.mock.calls.map((call) => call[0] as string);
+      expect(urls.every((u) => u.includes('conflict=iran-israel'))).toBe(true);
+      expect(urls.some((u) => u.includes('conflict=russia-ukraine'))).toBe(false);
+    });
   });
 
   it('does not crash and keeps previously accumulated events when a poll rejects', async () => {

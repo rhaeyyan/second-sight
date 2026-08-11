@@ -15,9 +15,15 @@ interface FeedMapProps {
   events: readonly IronsightEvent[];
   center: [number, number];
   zoom: number;
+  /** When true, ignores `center`/`zoom` in favor of fitting the map to whatever
+   *  geolocated events are actually being shown. `center`/`zoom` (driven by a single
+   *  theater's config) stop making sense once events from a second, geographically
+   *  distant theater can appear — without this, cross-theater viewing would silently
+   *  only show markers for whichever theater happens to be near the fixed center. */
+  autoFitBounds?: boolean;
 }
 
-export default function FeedMap({ events, center, zoom }: FeedMapProps) {
+export default function FeedMap({ events, center, zoom, autoFitBounds = false }: FeedMapProps) {
   const [mounted, setMounted] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
@@ -53,9 +59,13 @@ export default function FeedMap({ events, center, zoom }: FeedMapProps) {
     if (!L || !layerRef.current) return;
     layerRef.current.clearLayers();
 
+    const points: [number, number][] = [];
+
     events.forEach((event) => {
       if (!event.location) return;
-      const marker = L!.circleMarker([event.location.latitude, event.location.longitude], {
+      const point: [number, number] = [event.location.latitude, event.location.longitude];
+      points.push(point);
+      const marker = L!.circleMarker(point, {
         radius: 6,
         color: '#ff6600',
         fillColor: '#ff6600',
@@ -71,7 +81,15 @@ export default function FeedMap({ events, center, zoom }: FeedMapProps) {
       `);
       layerRef.current!.addLayer(marker);
     });
-  }, [events]);
+
+    // Fixed center/zoom (driven by one theater's config) stop making sense once events
+    // from a geographically distant second theater can be in `events` too — fit to what's
+    // actually being shown instead. maxZoom caps how far a single/tightly-clustered point
+    // would otherwise zoom in, matching fitBounds' own tendency to over-zoom on few points.
+    if (autoFitBounds && mapRef.current && points.length > 0) {
+      mapRef.current.fitBounds(L.latLngBounds(points), { padding: [20, 20], maxZoom: 8 });
+    }
+  }, [events, autoFitBounds]);
 
   const withLocation = events.filter((event) => event.location).length;
 
