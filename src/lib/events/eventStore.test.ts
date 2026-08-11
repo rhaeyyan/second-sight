@@ -131,6 +131,36 @@ describe('createEventStore — getBySourceId', () => {
   });
 });
 
+describe('createEventStore — getByIds', () => {
+  it('resolves ids to events, in the order the ids were given', () => {
+    const store = createEventStore({ maxSize: 10 });
+    store.add([makeEvent({ id: 'a' }), makeEvent({ id: 'b' }), makeEvent({ id: 'c' })]);
+
+    expect(store.getByIds(['c', 'a']).map((e) => e.id)).toEqual(['c', 'a']);
+  });
+
+  it('silently skips ids with no match rather than throwing', () => {
+    const store = createEventStore({ maxSize: 10 });
+    store.add([makeEvent({ id: 'a' })]);
+
+    expect(store.getByIds(['a', 'missing', 'also-missing']).map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('returns an empty array when none of the ids match', () => {
+    const store = createEventStore({ maxSize: 10 });
+    store.add([makeEvent({ id: 'a' })]);
+
+    expect(store.getByIds(['missing'])).toEqual([]);
+  });
+
+  it('returns an empty array for empty input', () => {
+    const store = createEventStore({ maxSize: 10 });
+    store.add([makeEvent({ id: 'a' })]);
+
+    expect(store.getByIds([])).toEqual([]);
+  });
+});
+
 describe('createEventStore — clear', () => {
   it('empties the store and resets size to 0', () => {
     const store = createEventStore({ maxSize: 10 });

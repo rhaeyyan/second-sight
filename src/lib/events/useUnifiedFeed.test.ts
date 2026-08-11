@@ -196,6 +196,29 @@ describe('useUnifiedFeed', () => {
     expect(result.current.events.map((e) => e.id).sort()).toEqual(['a', 'b']);
   });
 
+  it('exposes a store whose getByIds sees events added after pause, even though events stays frozen', async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    queueResponses(
+      fetchMock,
+      [makeEvent({ id: 'a' })],
+      [makeEvent({ id: 'a' }), makeEvent({ id: 'b' })]
+    );
+
+    const { result } = renderHook(() => useUnifiedFeed(INTERVAL), { wrapper });
+
+    await waitFor(() => expect(result.current.events.map((e) => e.id)).toEqual(['a']), WAIT_OPTS);
+
+    act(() => result.current.togglePause());
+    expect(result.current.paused).toBe(true);
+
+    await waitFor(
+      () => expect(result.current.store.getByIds(['a', 'b']).map((e) => e.id)).toEqual(['a', 'b']),
+      WAIT_OPTS
+    );
+    // The hook's own `events` is still pinned to the pre-pause snapshot.
+    expect(result.current.events.map((e) => e.id)).toEqual(['a']);
+  });
+
   it('does not crash and keeps previously accumulated events when a poll rejects', async () => {
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock

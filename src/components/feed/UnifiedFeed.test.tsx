@@ -3,8 +3,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'vitest-axe';
 import UnifiedFeed from './UnifiedFeed';
+import { useUnifiedFeed } from '@/lib/events/useUnifiedFeed';
 import { ConflictProvider } from '@/lib/conflicts/context';
 import type { IronsightEvent } from '@/lib/events/schema';
+
+// UnifiedFeed no longer calls useUnifiedFeed() itself (that call moved up to
+// src/app/feed/page.tsx so FindingsPanel can share the same store) — this harness
+// reproduces that composition for the component test.
+function UnifiedFeedHarness() {
+  const feedState = useUnifiedFeed();
+  return <UnifiedFeed feedState={feedState} />;
+}
 
 // toHaveNoViolations() is registered globally in vitest.setup.ts (working around
 // vitest-axe@0.1.0's own broken 'vitest-axe/extend-expect' entry point).
@@ -109,7 +118,7 @@ function stubFeedFetch(events: IronsightEvent[]) {
 async function renderFeed() {
   const utils = render(
     <ConflictProvider>
-      <UnifiedFeed />
+      <UnifiedFeedHarness />
     </ConflictProvider>,
   );
   // Wait for the initial fetch to resolve and the loading skeleton to be replaced by
@@ -220,7 +229,7 @@ describe('UnifiedFeed', () => {
 
       render(
         <ConflictProvider>
-          <UnifiedFeed />
+          <UnifiedFeedHarness />
         </ConflictProvider>,
       );
 
@@ -234,7 +243,7 @@ describe('UnifiedFeed', () => {
 
       render(
         <ConflictProvider>
-          <UnifiedFeed />
+          <UnifiedFeedHarness />
         </ConflictProvider>,
       );
 

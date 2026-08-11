@@ -14,6 +14,10 @@ export interface UnifiedFeedState {
   togglePause: () => void;
   /** Count of events added to the store since pause was activated. 0 when not paused. */
   newSinceCount: number;
+  /** The live, never-paused store backing this hook — for consumers (e.g. a findings
+   *  panel) that need to resolve ids or read the full accumulated set independent of
+   *  this hook's own paused/frozen `events` snapshot. */
+  store: EventStore;
 }
 
 const DEFAULT_INTERVAL = 120000;
@@ -118,5 +122,5 @@ export function useUnifiedFeed(interval: number = DEFAULT_INTERVAL): UnifiedFeed
     });
   }, []);
 
-  return { events, health, loading, error, paused, togglePause, newSinceCount };
+  return { events, health, loading, error, paused, togglePause, newSinceCount, store: storeRef.current };
 }

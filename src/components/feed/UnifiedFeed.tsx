@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useUnifiedFeed } from '@/lib/events/useUnifiedFeed';
+import type { UnifiedFeedState } from '@/lib/events/useUnifiedFeed';
 import { useConflict } from '@/lib/conflicts/context';
 import { EventSeveritySchema, type EventSeverity, type IronsightEvent } from '@/lib/events/schema';
 import FeedTable from './FeedTable';
@@ -61,9 +61,15 @@ function FilterFieldset<T extends string>({ legend, options, selected, onToggle 
   );
 }
 
-export default function UnifiedFeed() {
+interface UnifiedFeedProps {
+  /** Lifted up to src/app/feed/page.tsx, which is now the sole useUnifiedFeed() caller,
+   *  so FindingsPanel can share the same fetch/store instead of polling independently. */
+  feedState: UnifiedFeedState;
+}
+
+export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
   const { config } = useConflict();
-  const { events, loading, error, paused, togglePause, newSinceCount } = useUnifiedFeed();
+  const { events, loading, error, paused, togglePause, newSinceCount } = feedState;
 
   const [view, setView] = useState<'table' | 'map'>('table');
 

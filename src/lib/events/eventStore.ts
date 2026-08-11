@@ -32,6 +32,11 @@ export interface EventStore {
   /** All retained events, newest-first by reportedAt. */
   getAll(): readonly IronsightEvent[];
   getBySourceId(sourceId: string): readonly IronsightEvent[];
+  /** Resolves ids to events, in the order given. Ids with no match (evicted or never
+   *  ingested) are silently skipped rather than throwing — a caller resolving, e.g., an
+   *  AnalysisFinding's evidenceEventIds against this bounded store must treat a partially
+   *  resolved result as normal, not exceptional. */
+  getByIds(ids: readonly string[]): readonly IronsightEvent[];
   clear(): void;
   readonly size: number;
 }
@@ -66,6 +71,15 @@ export function createEventStore(options?: EventStoreOptions): EventStore {
 
     getBySourceId(sourceId: string): readonly IronsightEvent[] {
       return [...events.values()].filter((event) => event.source.id === sourceId);
+    },
+
+    getByIds(ids: readonly string[]): readonly IronsightEvent[] {
+      const resolved: IronsightEvent[] = [];
+      for (const id of ids) {
+        const event = events.get(id);
+        if (event) resolved.push(event);
+      }
+      return resolved;
     },
 
     clear(): void {
