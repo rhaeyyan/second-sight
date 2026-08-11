@@ -605,15 +605,19 @@ export default function ConflictMap({ className }: MapProps) {
       }
 
       const existing = airMarkersRef.current.get(id);
+      // Aircraft fields come from a live external ADSB feed (untrusted) — escaped before
+      // entering Leaflet's bindPopup(string)/bindTooltip(string), both innerHTML sinks
+      // react/no-danger can't see (see src/components/feed/utils.ts's escapeHtml doc).
+      const label = escapeHtml(f.callsign || f.icao24);
       const popupContent = `
         <div style="font-family:monospace;font-size:11px;color:#000;min-width:180px;">
-          <strong style="color:${color}">${f.callsign || f.icao24}</strong><br/>
-          <strong>${f.type}</strong><br/>
-          ${f.aircraftType ? `Platform: ${f.aircraftType}${f.registration ? ` (${f.registration})` : ''}<br/>` : ''}
-          Origin: ${f.origin}<br/>
+          <strong style="color:${color}">${label}</strong><br/>
+          <strong>${escapeHtml(f.type)}</strong><br/>
+          ${f.aircraftType ? `Platform: ${escapeHtml(f.aircraftType)}${f.registration ? ` (${escapeHtml(f.registration)})` : ''}<br/>` : ''}
+          Origin: ${escapeHtml(f.origin)}<br/>
           Alt: ${f.altitude.toLocaleString()} ft<br/>
           Speed: ${f.speed} kts | Hdg: ${f.heading}°
-          ${f.squawk ? `<br/>Squawk: ${f.squawk}` : ''}
+          ${f.squawk ? `<br/>Squawk: ${escapeHtml(f.squawk)}` : ''}
           <br/><em style="color:#666;font-size:9px;">Click to show flight trail</em>
         </div>
       `;
@@ -635,7 +639,7 @@ export default function ConflictMap({ className }: MapProps) {
           }),
         });
         marker.bindPopup(popupContent);
-        marker.bindTooltip(f.callsign || f.icao24, { direction: 'top', offset: [0, -10], className: 'aircraft-label' });
+        marker.bindTooltip(label, { direction: 'top', offset: [0, -10], className: 'aircraft-label' });
 
         // Click to show trail, close to hide
         marker.on('click', () => showTrailForAircraft(id));
@@ -704,12 +708,16 @@ export default function ConflictMap({ className }: MapProps) {
     drones.forEach(d => {
       currentIds.add(d.id);
       const timeStr = new Date(d.time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      // Neptun is a live external tracker (untrusted) — escaped before entering Leaflet's
+      // bindPopup(string)/bindTooltip(string), same as the aircraft layer above.
+      const label = escapeHtml(d.label);
+      const place = d.place ? escapeHtml(d.place) : '';
       const popupHtml = `
         <div style="font-family:monospace;font-size:11px;color:#000;min-width:200px;max-width:280px;">
-          <strong style="color:${d.color};font-size:12px;">${d.label}${d.count > 1 ? ` ×${d.count}` : ''}</strong><br/>
-          ${d.place ? `<span style="color:#333;">→ ${d.place}</span><br/>` : ''}
+          <strong style="color:${d.color};font-size:12px;">${label}${d.count > 1 ? ` ×${d.count}` : ''}</strong><br/>
+          ${place ? `<span style="color:#333;">→ ${place}</span><br/>` : ''}
           <span style="color:#555;">Heading ${d.heading}° • Confidence ${d.confidence}%</span>
-          ${d.text ? `<div style="margin:4px 0;line-height:1.35;">${d.text}</div>` : ''}
+          ${d.text ? `<div style="margin:4px 0;line-height:1.35;">${escapeHtml(d.text)}</div>` : ''}
           <em style="color:#888;font-size:9px;">Neptun • ${timeStr}</em>
         </div>`;
       const iconHtml = `<div style="width:20px;height:20px;position:relative;">
@@ -737,7 +745,7 @@ export default function ConflictMap({ className }: MapProps) {
           icon: L!.divIcon({ className: 'drone-marker', html: iconHtml, iconSize: [20, 20], iconAnchor: [10, 10] }),
         });
         marker.bindPopup(popupHtml);
-        marker.bindTooltip(`${d.label}${d.place ? ` → ${d.place}` : ''}`, { direction: 'top', offset: [0, -8], className: 'drone-label' });
+        marker.bindTooltip(`${label}${place ? ` → ${place}` : ''}`, { direction: 'top', offset: [0, -8], className: 'drone-label' });
         droneLayerRef.current!.addLayer(marker);
         droneMarkersRef.current.set(d.id, marker);
       }
@@ -786,7 +794,7 @@ export default function ConflictMap({ className }: MapProps) {
       alertCircle.bindPopup(`
         <div style="font-family:monospace;font-size:11px;color:#000;">
           <strong style="color:red">ACTIVE ALERTS</strong><br/>
-          ${alerts.alerts.map(a => `${a.type}: ${a.threat}`).join('<br/>')}
+          ${alerts.alerts.map(a => `${escapeHtml(a.type)}: ${escapeHtml(a.threat)}`).join('<br/>')}
         </div>
       `);
       alertLayerRef.current.addLayer(alertCircle);
@@ -799,7 +807,7 @@ export default function ConflictMap({ className }: MapProps) {
             const sirens = L!.circleMarker(coords, {
               radius: 12, color: '#ff3366', fillColor: '#ff3366', fillOpacity: 0.4, weight: 2, className: 'alert-flash',
             });
-            sirens.bindPopup(`<div style="font-family:monospace;font-size:11px;color:#000;"><strong style="color:red">${alert.type}</strong><br/>${loc}<br/>${alert.threat}</div>`);
+            sirens.bindPopup(`<div style="font-family:monospace;font-size:11px;color:#000;"><strong style="color:red">${escapeHtml(alert.type)}</strong><br/>${escapeHtml(loc)}<br/>${escapeHtml(alert.threat)}</div>`);
             alertLayerRef.current!.addLayer(sirens);
           }
         });
@@ -933,11 +941,15 @@ export default function ConflictMap({ className }: MapProps) {
       const timeStr = new Date(event.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       const typeColor = event.type === 'MISSILE' ? '#ff0044' : event.type === 'DRONE' ? '#ff6600' : '#ff3300';
       const sourceTag = event.fromTelegram ? '📡 ' : '';
+      // event.title/event.source are feed-sourced text (conflicts/strikes/Telegram, all
+      // untrusted) — escaped before entering Leaflet's bindPopup(string) innerHTML sink.
+      // event.type/geo.place are not: type is classifier-constrained to a fixed set of
+      // literals, and geo.place always comes from cfg.strikeTargets (static config).
       const popupHtml = `
         <div style="font-family:monospace;font-size:11px;color:#000;min-width:220px;max-width:300px;">
           <strong style="color:${typeColor};font-size:12px;">${event.type} — ${geo.place}</strong><br/>
-          <div style="margin:4px 0;line-height:1.4;">${event.title}</div>
-          <em style="color:#666;font-size:9px;">${sourceTag}${event.source} • ${timeStr}</em>
+          <div style="margin:4px 0;line-height:1.4;">${escapeHtml(event.title)}</div>
+          <em style="color:#666;font-size:9px;">${sourceTag}${escapeHtml(event.source)} • ${timeStr}</em>
         </div>
       `;
 
