@@ -44,6 +44,7 @@ const conflictsFetch = vi.fn<() => Promise<SourceAdapterResult>>();
 const newsFetch = vi.fn<() => Promise<SourceAdapterResult>>();
 const firmsFetch = vi.fn<() => Promise<SourceAdapterResult>>();
 const weatherFetch = vi.fn<() => Promise<SourceAdapterResult>>();
+const usgsFetch = vi.fn<() => Promise<SourceAdapterResult>>();
 
 vi.mock('@/lib/events/adapters/googleNewsConflict', () => ({
   createGoogleNewsConflictAdapter: (): SourceAdapter => ({
@@ -73,6 +74,13 @@ vi.mock('@/lib/events/adapters/openMeteoWeather', () => ({
   }),
 }));
 
+vi.mock('@/lib/events/adapters/usgsEarthquakes', () => ({
+  createUsgsEarthquakesAdapter: (): SourceAdapter => ({
+    sourceId: 'usgs-earthquakes',
+    fetch: usgsFetch,
+  }),
+}));
+
 // translateFreeText hits a real network endpoint (translate.googleapis.com) — mocked
 // so tests are deterministic and offline. isHebrew is left as the real implementation
 // (plain regex, no I/O) since mocking it would just be re-describing its own logic.
@@ -85,7 +93,7 @@ vi.mock('@/lib/hebrew', async () => {
 });
 
 describe('GET /api/feed', () => {
-  it('merges events from all four adapters into one newest-first list', async () => {
+  it('merges events from all five adapters into one newest-first list', async () => {
     conflictsFetch.mockResolvedValueOnce(
       result([event({ id: 'c1', reportedAt: MOCK_NOW - 1000, source: { id: 's', name: 'Conflicts', sourceType: 'media' } })], 'google-news-conflict-iran-israel')
     );
@@ -98,11 +106,14 @@ describe('GET /api/feed', () => {
     weatherFetch.mockResolvedValueOnce(
       result([event({ id: 'w1', reportedAt: MOCK_NOW - 3000, source: { id: 's', name: 'Open-Meteo', sourceType: 'sensor' } })], 'open-meteo-weather-iran-israel')
     );
+    usgsFetch.mockResolvedValueOnce(
+      result([event({ id: 'u1', reportedAt: MOCK_NOW - 4000, source: { id: 's', name: 'USGS', sourceType: 'sensor' } })], 'usgs-earthquakes')
+    );
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
     const body = (await res.json()) as IronsightEvent[];
 
-    expect(body.map((e) => e.id)).toEqual(['n1', 'c1', 'f1', 'w1']); // newest reportedAt first
+    expect(body.map((e) => e.id)).toEqual(['n1', 'c1', 'f1', 'w1', 'u1']); // newest reportedAt first
   });
 
   it('populates originalTitle/originalLanguage and translates a Hebrew news title, leaving non-news events untouched', async () => {
@@ -115,6 +126,7 @@ describe('GET /api/feed', () => {
     );
     firmsFetch.mockResolvedValueOnce(result([], 'nasa-firms'));
     weatherFetch.mockResolvedValueOnce(result([], 'open-meteo-weather-iran-israel'));
+    usgsFetch.mockResolvedValueOnce(result([], 'usgs-earthquakes'));
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
     const body = (await res.json()) as IronsightEvent[];
@@ -130,6 +142,7 @@ describe('GET /api/feed', () => {
     newsFetch.mockResolvedValueOnce(result([event({ id: 'n1', title: 'Ceasefire talks resume' })], 'news-rss-iran-israel'));
     firmsFetch.mockResolvedValueOnce(result([], 'nasa-firms'));
     weatherFetch.mockResolvedValueOnce(result([], 'open-meteo-weather-iran-israel'));
+    usgsFetch.mockResolvedValueOnce(result([], 'usgs-earthquakes'));
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
     const body = (await res.json()) as IronsightEvent[];
@@ -138,21 +151,23 @@ describe('GET /api/feed', () => {
     expect(body[0].title).toBe('Ceasefire talks resume');
   });
 
-  it('emits X-Source-Health with exactly 4 entries in [conflicts, news, firms, weather] order', async () => {
+  it('emits X-Source-Health with exactly 5 entries in [conflicts, news, firms, weather, usgs] order', async () => {
     conflictsFetch.mockResolvedValueOnce(result([], 'google-news-conflict-iran-israel'));
     newsFetch.mockResolvedValueOnce(result([], 'news-rss-iran-israel'));
     firmsFetch.mockResolvedValueOnce(result([], 'nasa-firms'));
     weatherFetch.mockResolvedValueOnce(result([], 'open-meteo-weather-iran-israel'));
+    usgsFetch.mockResolvedValueOnce(result([], 'usgs-earthquakes'));
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
     const health = JSON.parse(res.headers.get('X-Source-Health') ?? '[]');
 
-    expect(health).toHaveLength(4);
+    expect(health).toHaveLength(5);
     expect(health.map((h: { sourceId: string }) => h.sourceId)).toEqual([
       'google-news-conflict-iran-israel',
       'news-rss-iran-israel',
       'nasa-firms',
       'open-meteo-weather-iran-israel',
+      'usgs-earthquakes',
     ]);
   });
 
@@ -161,27 +176,30 @@ describe('GET /api/feed', () => {
     newsFetch.mockResolvedValueOnce(result([], 'news-rss-iran-israel'));
     firmsFetch.mockResolvedValueOnce(result([], 'nasa-firms'));
     weatherFetch.mockResolvedValueOnce(result([], 'open-meteo-weather-iran-israel'));
+    usgsFetch.mockResolvedValueOnce(result([], 'usgs-earthquakes'));
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
 
     expect(res.headers.get('Cache-Control')).toBe('no-cache, no-store, must-revalidate');
   });
 
-  it('does not crash if one adapter fetch() rejects — the other three sources still come through', async () => {
+  it('does not crash if one adapter fetch() rejects — the other four sources still come through', async () => {
     conflictsFetch.mockRejectedValueOnce(new Error('network unreachable'));
     newsFetch.mockResolvedValueOnce(result([event({ id: 'n1' })], 'news-rss-iran-israel'));
     firmsFetch.mockResolvedValueOnce(result([event({ id: 'f1' })], 'nasa-firms'));
     weatherFetch.mockResolvedValueOnce(result([event({ id: 'w1' })], 'open-meteo-weather-iran-israel'));
+    usgsFetch.mockResolvedValueOnce(result([event({ id: 'u1' })], 'usgs-earthquakes'));
 
     const res = await GET(new Request('http://localhost/api/feed?conflict=iran-israel'));
     const body = (await res.json()) as IronsightEvent[];
 
-    expect(body.map((e) => e.id).sort()).toEqual(['f1', 'n1', 'w1']);
+    expect(body.map((e) => e.id).sort()).toEqual(['f1', 'n1', 'u1', 'w1']);
 
     const health = JSON.parse(res.headers.get('X-Source-Health') ?? '[]');
     expect(health[0].status).toBe('unavailable');
     expect(health[1].status).toBe('healthy');
     expect(health[2].status).toBe('healthy');
     expect(health[3].status).toBe('healthy');
+    expect(health[4].status).toBe('healthy');
   });
 });
