@@ -29,4 +29,6 @@ export interface NewsItem {
   source: string;
   pubDate: string;
   category?: string;
+  originalTitle?: string;
+  originalLanguage?: string;
 }

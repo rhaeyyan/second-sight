@@ -14,11 +14,13 @@ interface FindingsPanelProps {
   store: EventStore;
   /** Forwarded to useFindings; only overridden in tests. */
   interval?: number;
+  /** Callback fired when an evidence event is clicked to cross-link to the feed */
+  onEvidenceClick?: (eventId: string) => void;
 }
 
 const ANNOUNCEMENT_CLEAR_MS = 1000;
 
-export default function FindingsPanel({ store, interval }: FindingsPanelProps) {
+export default function FindingsPanel({ store, interval, onEvidenceClick }: FindingsPanelProps) {
   const { findings } = useFindings({ store, interval });
 
   // Tracks the id set as of the last render, so the panel's first render (the initial
@@ -98,6 +100,7 @@ export default function FindingsPanel({ store, interval }: FindingsPanelProps) {
               key={finding.id}
               finding={finding}
               evidenceEvents={store.getByIds(finding.evidenceEventIds)}
+              onEvidenceClick={onEvidenceClick}
             />
           ))
         )}

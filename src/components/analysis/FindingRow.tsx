@@ -12,6 +12,8 @@ interface FindingRowProps {
   /** Evidence events resolved from the live store — may be a subset of
    *  finding.evidenceEventIds if some have aged out of the bounded ring buffer. */
   evidenceEvents: readonly IronsightEvent[];
+  /** Callback fired when an evidence event is clicked to cross-link to the feed */
+  onEvidenceClick?: (eventId: string) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ interface FindingRowProps {
  * confirmed alerts (CLAUDE.md: "false certainty is a real harm"), so the visual weight
  * stays below AlertsPanel's actually-confirmed threat styling.
  */
-export default function FindingRow({ finding, evidenceEvents }: FindingRowProps) {
+export default function FindingRow({ finding, evidenceEvents, onEvidenceClick }: FindingRowProps) {
   const [expanded, setExpanded] = useState(false);
   const detailId = useId();
   const color = SEVERITY_COLORS[finding.severity];
@@ -89,7 +91,13 @@ export default function FindingRow({ finding, evidenceEvents }: FindingRowProps)
                   <span className="text-[var(--text-secondary)] whitespace-nowrap">
                     {timeAgo(new Date(event.reportedAt).toISOString())}
                   </span>
-                  <span className="text-[var(--text-secondary)] whitespace-nowrap">{event.source.name}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => onEvidenceClick?.(event.id)}
+                    className="text-[var(--text-secondary)] whitespace-nowrap hover:text-[var(--cyan)] hover:underline cursor-pointer text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--cyan)]"
+                  >
+                    {event.source.name}
+                  </button>
                   {event.url ? (
                     <a
                       href={event.url}
@@ -100,7 +108,13 @@ export default function FindingRow({ finding, evidenceEvents }: FindingRowProps)
                       {event.title}
                     </a>
                   ) : (
-                    <span className="text-[var(--text-primary)] truncate">{event.title}</span>
+                    <button 
+                      type="button"
+                      onClick={() => onEvidenceClick?.(event.id)}
+                      className="text-[var(--text-primary)] hover:text-[var(--cyan)] hover:underline truncate text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--cyan)]"
+                    >
+                      {event.title}
+                    </button>
                   )}
                 </div>
               );

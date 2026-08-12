@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useConflictFeed } from '@/lib/hooks';
 import { useConflict } from '@/lib/conflicts/context';
 import { playAlertSound } from '@/lib/generateAlert';
+import { isRtlLanguage } from '../feed/utils';
 
 interface AlertData {
   status: 'ACTIVE' | 'CLEAR';
@@ -13,7 +14,10 @@ interface AlertData {
     time: string;
     type: string;
     threat: string;
+    threatOriginal?: string;
     locations: string[];
+    locationsOriginal?: string[];
+    originalLanguage?: string;
     source: string;
     active: boolean;
   }[];
@@ -200,9 +204,27 @@ export default function AlertsPanel() {
                 </div>
                 <div className="text-[11px] text-[var(--text-primary)]">
                   {alert.threat}
+                  {alert.threatOriginal && alert.threatOriginal !== alert.threat && alert.originalLanguage === 'he' && (
+                    <div
+                      lang={alert.originalLanguage}
+                      dir={isRtlLanguage(alert.originalLanguage) ? 'rtl' : 'ltr'}
+                      className="text-[9px] text-[var(--text-secondary)] mt-0.5"
+                    >
+                      {alert.threatOriginal}
+                    </div>
+                  )}
                 </div>
                 <div className="text-[9px] text-[var(--text-secondary)] mt-0.5">
                   {alert.locations.join(', ')}
+                  {alert.locationsOriginal && alert.locationsOriginal.join(', ') !== alert.locations.join(', ') && alert.originalLanguage === 'he' && (
+                    <div
+                      lang={alert.originalLanguage}
+                      dir={isRtlLanguage(alert.originalLanguage) ? 'rtl' : 'ltr'}
+                      className="text-[9px] text-[var(--text-secondary)] mt-0.5"
+                    >
+                      {alert.locationsOriginal.join(', ')}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

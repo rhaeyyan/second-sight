@@ -1,9 +1,18 @@
-import { clusterEvents } from './incident';
+import { clusterEvents, type Incident } from './incident';
 import { applyCorroborationRule } from './rules/corroboration';
 import { applySensorNarrativeCorrelationRule } from './rules/sensorNarrativeCorrelation';
 import { applyEscalationPatternRule } from './rules/escalationPattern';
 import type { AnalysisFinding } from './finding';
 import type { IronsightEvent } from '@/lib/events/schema';
+
+export interface CorrelationEngineOptions {
+  previousClusters?: Incident[];
+}
+
+export interface CorrelationEngineResult {
+  findings: AnalysisFinding[];
+  clusters: Incident[];
+}
 
 /**
  * Runs the Phase 3 correlation engine (draft-implementation-plan.md §4) over a batch of
@@ -15,15 +24,18 @@ import type { IronsightEvent } from '@/lib/events/schema';
  */
 export function runCorrelationEngine(
   events: IronsightEvent[],
-  now: () => number = Date.now
-): AnalysisFinding[] {
-  const incidents = clusterEvents(events);
+  now: () => number = Date.now,
+  options?: CorrelationEngineOptions
+): CorrelationEngineResult {
+  const clusters = clusterEvents(events, { previousClusters: options?.previousClusters });
 
-  return [
-    ...applyCorroborationRule(incidents, events, now),
+  const findings = [
+    ...applyCorroborationRule(clusters, events, now),
     ...applySensorNarrativeCorrelationRule(events, undefined, now),
     ...applyEscalationPatternRule(events, undefined, now),
   ];
+
+  return { findings, clusters };
 }
 
 /**

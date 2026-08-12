@@ -116,6 +116,7 @@ export async function fetchTzevaAdomAlerts(
           threatOriginal: rawThreat,
           locations: translatedLocations,
           locationsOriginal: rawCities,
+          originalLanguage: 'he',
           source: sourceLabel,
           active: true,
         });
@@ -176,6 +177,7 @@ export async function fetchUkraineAlerts(
         threatOriginal: `ua-${s.id ?? name}`,
         locations: [name],
         locationsOriginal: [name],
+        originalLanguage: 'uk',
         source: sourceLabel,
         active: true,
       });
@@ -213,6 +215,7 @@ interface AlertEvent {
   threatOriginal: string;
   locations: string[];
   locationsOriginal: string[];
+  originalLanguage?: string;
   source: string;
   active: boolean;
 }

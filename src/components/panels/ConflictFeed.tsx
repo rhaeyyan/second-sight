@@ -2,6 +2,7 @@
 
 import { useConflictFeed, timeAgo, useTick } from '@/lib/hooks';
 import type { IronsightEvent } from '@/lib/events/schema';
+import { isRtlLanguage } from '../feed/utils';
 
 const TYPE_COLORS: Record<string, string> = {
   STRIKE: 'var(--red)',
@@ -65,6 +66,15 @@ export default function ConflictFeed() {
                 <p className="text-[11px] leading-tight text-[var(--text-primary)]">
                   {event.title}
                 </p>
+                {event.originalTitle && (
+                  <div
+                    lang={event.originalLanguage}
+                    dir={isRtlLanguage(event.originalLanguage) ? 'rtl' : 'ltr'}
+                    className="text-[9px] text-[var(--text-secondary)] mt-0.5"
+                  >
+                    {event.originalTitle}
+                  </div>
+                )}
                 <span className="text-[8px] text-[var(--text-secondary)]">
                   via {event.source.name}
                 </span>

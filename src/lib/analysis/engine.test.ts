@@ -54,7 +54,7 @@ describe('runCorrelationEngine', () => {
       makeEvent({ id: 'e3', type: 'STRIKE', severity: 'critical', reportedAt: MOCK_NOW + 60 * 60_000, title: 'Escalation event three', source: { id: 'src-f', name: 'F', sourceType: 'media' } }),
     ];
 
-    const findings = runCorrelationEngine(events, () => MOCK_NOW);
+    const { findings } = runCorrelationEngine(events, () => MOCK_NOW);
 
     const ruleIds = new Set(findings.map((f) => f.ruleId));
     expect(ruleIds.has(CORROBORATION_RULE_ID)).toBe(true);
@@ -68,7 +68,7 @@ describe('runCorrelationEngine', () => {
       makeEvent({ id: 'c2', title: 'Missile strike hits Tehran overnight', source: { id: 'src-b', name: 'B', sourceType: 'media' }, reportedAt: MOCK_NOW + 5 * 60_000 }),
     ];
 
-    const findings = runCorrelationEngine(events, () => MOCK_NOW);
+    const { findings } = runCorrelationEngine(events, () => MOCK_NOW);
 
     expect(findings.length).toBeGreaterThan(0);
     for (const finding of findings) {
@@ -78,7 +78,7 @@ describe('runCorrelationEngine', () => {
 
   it('returns an empty array for an empty event list, without throwing', () => {
     expect(() => runCorrelationEngine([], () => MOCK_NOW)).not.toThrow();
-    expect(runCorrelationEngine([], () => MOCK_NOW)).toEqual([]);
+    expect(runCorrelationEngine([], () => MOCK_NOW).findings).toEqual([]);
   });
 
   it('returns an empty array when no events satisfy any rule', () => {
@@ -87,11 +87,11 @@ describe('runCorrelationEngine', () => {
       makeEvent({ id: 'b', title: 'Oil futures spike amid conflict fears', reportedAt: MOCK_NOW + 60_000 }),
     ];
 
-    expect(runCorrelationEngine(events, () => MOCK_NOW)).toEqual([]);
+    expect(runCorrelationEngine(events, () => MOCK_NOW).findings).toEqual([]);
   });
 
   it('defaults the clock to Date.now when not provided', () => {
-    const findings = runCorrelationEngine([]);
+    const { findings } = runCorrelationEngine([]);
     expect(findings).toEqual([]);
   });
 });

@@ -22,6 +22,10 @@ export interface ClusterOptions {
   windowMs?: number;
   /** Min title-token Jaccard similarity to cluster. Default 0.4. */
   similarityThreshold?: number;
+  /** Previous run's clusters to memoize against. */
+  previousClusters?: Incident[];
+  /** Callback fired for every jaccard similarity comparison (for tests). */
+  onCompare?: () => void;
 }
 
 const DEFAULT_WINDOW_MS = 2 * 60 * 60 * 1000;
@@ -106,12 +110,33 @@ export function clusterEvents(events: IronsightEvent[], options: ClusterOptions 
     tokensById.set(event.id, tokenize(event.title));
   }
 
+  const clusteredEventIds = new Set<string>();
+  if (options.previousClusters) {
+    for (const cluster of options.previousClusters) {
+      if (cluster.eventIds.length === 0) continue;
+      const firstId = cluster.eventIds[0];
+      clusteredEventIds.add(firstId);
+      for (let i = 1; i < cluster.eventIds.length; i++) {
+        clusteredEventIds.add(cluster.eventIds[i]);
+        ds.union(firstId, cluster.eventIds[i]);
+      }
+    }
+  }
+
   for (let i = 0; i < events.length; i++) {
     for (let j = i + 1; j < events.length; j++) {
       const a = events[i];
       const b = events[j];
+      
+      // Skip stable-vs-stable comparisons
+      if (clusteredEventIds.has(a.id) && clusteredEventIds.has(b.id)) {
+        continue;
+      }
+      
       if (a.theater !== b.theater) continue;
       if (Math.abs(a.reportedAt - b.reportedAt) > windowMs) continue;
+      
+      options.onCompare?.();
       const similarity = jaccardSimilarity(tokensById.get(a.id)!, tokensById.get(b.id)!);
       if (similarity >= threshold) ds.union(a.id, b.id);
     }

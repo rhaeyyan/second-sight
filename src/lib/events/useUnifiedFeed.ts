@@ -26,7 +26,7 @@ export interface UnifiedFeedState {
   toggleAllTheaters: () => void;
 }
 
-const DEFAULT_INTERVAL = 120000;
+const DEFAULT_INTERVAL = 60000;
 
 /**
  * Polls `/api/feed` and accumulates results into a bounded EventStore (Phase 1's ring

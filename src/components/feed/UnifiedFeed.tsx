@@ -66,9 +66,11 @@ interface UnifiedFeedProps {
   /** Lifted up to src/app/feed/page.tsx, which is now the sole useUnifiedFeed() caller,
    *  so FindingsPanel can share the same fetch/store instead of polling independently. */
   feedState: UnifiedFeedState;
+  /** Set of event IDs that should be briefly highlighted (e.g. when clicked in FindingsPanel) */
+  highlightedIds?: Set<string>;
 }
 
-export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
+export default function UnifiedFeed({ feedState, highlightedIds }: UnifiedFeedProps) {
   const { config } = useConflict();
   const { events, loading, error, paused, togglePause, newSinceCount, allTheaters, toggleAllTheaters } = feedState;
 
@@ -207,13 +209,13 @@ export default function UnifiedFeed({ feedState }: UnifiedFeedProps) {
       )}
 
       {loading && events.length === 0 ? (
-        <div className="space-y-2 p-3">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="loading-shimmer h-10 rounded" />
-          ))}
-        </div>
+        view === 'table' ? (
+          <FeedTable events={[]} showTheater={allTheaters} loading={true} />
+        ) : (
+          <div className="flex-1 loading-shimmer rounded m-3" />
+        )
       ) : view === 'table' ? (
-        <FeedTable events={filteredEvents} showTheater={allTheaters} />
+        <FeedTable events={filteredEvents} showTheater={allTheaters} highlightedIds={highlightedIds} />
       ) : (
         <FeedMap
           events={filteredEvents}

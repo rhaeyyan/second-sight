@@ -56,6 +56,8 @@ export function toNewsItem(event: IronsightEvent): NewsItem {
     source: event.source.name,
     pubDate: new Date(event.reportedAt).toISOString(),
     category: event.tags[0],
+    originalTitle: event.originalTitle,
+    originalLanguage: event.originalLanguage,
   };
 }
 

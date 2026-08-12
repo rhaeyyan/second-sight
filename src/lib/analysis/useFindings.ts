@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EventStore } from '@/lib/events/eventStore';
-import { runCorrelationEngine, pruneExpiredFindings } from './engine';
+import { runCorrelationEngine, pruneExpiredFindings, type CorrelationEngineResult } from './engine';
 import type { AnalysisFinding } from './finding';
+import type { Incident } from './incident';
 
 export interface UseFindingsOptions {
   /** The live EventStore to correlate against — pass the same store instance
@@ -20,9 +21,9 @@ export interface UseFindingsState {
 
 const DEFAULT_INTERVAL = 60000;
 
-function runEngine(store: EventStore, now: number, fallback: AnalysisFinding[]): AnalysisFinding[] {
+function runEngine(store: EventStore, now: number, fallback: CorrelationEngineResult): CorrelationEngineResult {
   try {
-    return runCorrelationEngine([...store.getAll()], () => now);
+    return runCorrelationEngine([...store.getAll()], () => now, { previousClusters: fallback.clusters });
   } catch (err) {
     // A thrown engine call is a bug, not an expected runtime condition (the engine is
     // pure/synchronous over data already validated at ingestion) — log and keep serving
@@ -32,9 +33,9 @@ function runEngine(store: EventStore, now: number, fallback: AnalysisFinding[]):
   }
 }
 
-function computeInitial(store: EventStore): { raw: AnalysisFinding[]; size: number; now: number } {
+function computeInitial(store: EventStore): { raw: CorrelationEngineResult; size: number; now: number } {
   const now = Date.now();
-  return { raw: runEngine(store, now, []), size: store.size, now };
+  return { raw: runEngine(store, now, { findings: [], clusters: [] }), size: store.size, now };
 }
 
 /**
@@ -69,7 +70,7 @@ export function useFindings({ store, interval = DEFAULT_INTERVAL }: UseFindingsO
   const lastSeenSizeRef = useRef(initial.size);
 
   const [findings, setFindings] = useState<readonly AnalysisFinding[]>(() =>
-    pruneExpiredFindings(initial.raw, initial.now),
+    pruneExpiredFindings(initial.raw.findings, initial.now),
   );
   const [lastComputedAt, setLastComputedAt] = useState(initial.now);
 
@@ -81,7 +82,7 @@ export function useFindings({ store, interval = DEFAULT_INTERVAL }: UseFindingsO
         lastSeenSizeRef.current = store.size;
         setLastComputedAt(now);
       }
-      setFindings(pruneExpiredFindings(rawFindingsRef.current, now));
+      setFindings(pruneExpiredFindings(rawFindingsRef.current.findings, now));
     }, interval);
     return () => clearInterval(id);
   }, [store, interval]);

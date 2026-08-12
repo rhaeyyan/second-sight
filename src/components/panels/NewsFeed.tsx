@@ -3,6 +3,7 @@
 import { useConflictFeed, timeAgo, useTick } from '@/lib/hooks';
 import { useConflict } from '@/lib/conflicts/context';
 import type { NewsItem } from '@/types';
+import { isRtlLanguage } from '../feed/utils';
 
 export default function NewsFeed() {
   const { config } = useConflict();
@@ -48,6 +49,15 @@ export default function NewsFeed() {
                 <p className="text-[11px] leading-tight text-[var(--text-primary)] truncate">
                   {item.title}
                 </p>
+                {item.originalTitle && (
+                  <div
+                    lang={item.originalLanguage}
+                    dir={isRtlLanguage(item.originalLanguage) ? 'rtl' : 'ltr'}
+                    className="text-[9px] text-[var(--text-secondary)] mt-0.5 truncate"
+                  >
+                    {item.originalTitle}
+                  </div>
+                )}
                 <span className="text-[9px] text-[var(--text-secondary)]">
                   {timeAgo(item.pubDate)}
                 </span>
